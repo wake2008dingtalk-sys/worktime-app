@@ -51,10 +51,11 @@ jobs:
         run: |
           echo "${{ secrets.SIGNING_KEYSTORE_BASE64 }}" | base64 -d > cordova-app/worktime-release.keystore
 
-      - name: Build unsigned APK
+      - name: Build unsigned APK with Gradle
+        working-directory: cordova-app/platforms/android
         run: |
-          cd cordova-app
-          cordova build android --release
+          chmod +x gradlew
+          ./gradlew assembleRelease
 
       - name: Sign APK
         env:
@@ -64,9 +65,11 @@ jobs:
         run: |
           export ANDROID_HOME=${ANDROID_HOME:-/usr/local/lib/android/sdk}
           BUILD_TOOLS=$(ls -d $ANDROID_HOME/build-tools/* | sort -V | tail -1)
-          UNSIGNED_APK=cordova-app/platforms/android/app/build/outputs/apk/release/app-release-unsigned.apk
-          SIGNED_APK=cordova-app/platforms/android/app/build/outputs/apk/release/app-release.apk
-          jarsigner -verbose -sigalg SHA256withRSA -digestalg SHA-256 -keystore cordova-app/worktime-release.keystore -storepass $KEYSTORE_PASSWORD -keypass $KEY_PASSWORD $UNSIGNED_APK $KEY_ALIAS
+          REPO_ROOT=$(pwd)
+          UNSIGNED_APK=$REPO_ROOT/cordova-app/platforms/android/app/build/outputs/apk/release/app-release-unsigned.apk
+          SIGNED_APK=$REPO_ROOT/cordova-app/platforms/android/app/build/outputs/apk/release/app-release.apk
+          KEYSTORE=$REPO_ROOT/cordova-app/worktime-release.keystore
+          jarsigner -verbose -sigalg SHA256withRSA -digestalg SHA-256 -keystore $KEYSTORE -storepass $KEYSTORE_PASSWORD -keypass $KEY_PASSWORD $UNSIGNED_APK $KEY_ALIAS
           $BUILD_TOOLS/zipalign -v 4 $UNSIGNED_APK $SIGNED_APK
 
       - name: Upload APK
@@ -74,6 +77,3 @@ jobs:
         with:
           name: android-release
           path: cordova-app/platforms/android/app/build/outputs/apk/release/app-release.apk
-
-      
-      
