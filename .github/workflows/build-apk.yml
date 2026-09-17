@@ -43,7 +43,14 @@ jobs:
       - name: Copy web assets
         run: |
           cp index.html cordova-app/www/
-      
+          cp -r app-icon cordova-app/www/ 2>/dev/null || true
+          cp manifest.json cordova-app/www/ 2>/dev/null || true
+          cp sw.js cordova-app/www/ 2>/dev/null || true
+
+      - name: Decode keystore
+        run: |
+          echo "${{ secrets.SIGNING_KEYSTORE_BASE64 }}" | base64 -d > cordova-app/worktime-release.keystore
+
       - name: Build unsigned APK
         run: |
           cd cordova-app
@@ -59,7 +66,7 @@ jobs:
           BUILD_TOOLS=$(ls -d $ANDROID_HOME/build-tools/* | sort -V | tail -1)
           UNSIGNED_APK=cordova-app/platforms/android/app/build/outputs/apk/release/app-release-unsigned.apk
           SIGNED_APK=cordova-app/platforms/android/app/build/outputs/apk/release/app-release.apk
-          jarsigner -verbose -sigalg SHA256withRSA -digestalg SHA-256 -keystore worktime-release.keystore -storepass $KEYSTORE_PASSWORD -keypass $KEY_PASSWORD $UNSIGNED_APK $KEY_ALIAS
+          jarsigner -verbose -sigalg SHA256withRSA -digestalg SHA-256 -keystore cordova-app/worktime-release.keystore -storepass $KEYSTORE_PASSWORD -keypass $KEY_PASSWORD $UNSIGNED_APK $KEY_ALIAS
           $BUILD_TOOLS/zipalign -v 4 $UNSIGNED_APK $SIGNED_APK
 
       - name: Upload APK
@@ -67,5 +74,6 @@ jobs:
         with:
           name: android-release
           path: cordova-app/platforms/android/app/build/outputs/apk/release/app-release.apk
+
       
       
