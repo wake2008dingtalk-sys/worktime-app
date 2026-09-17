@@ -43,14 +43,7 @@ jobs:
       - name: Copy web assets
         run: |
           cp index.html cordova-app/www/
-          cp -r app-icon cordova-app/www/ 2>/dev/null || true
-          cp manifest.json cordova-app/www/ 2>/dev/null || true
-          cp sw.js cordova-app/www/ 2>/dev/null || true
-
-      - name: Decode keystore
-        run: |
-          echo "${{ secrets.SIGNING_KEYSTORE_BASE64 }}" | base64 -d > cordova-app/worktime-release.keystore
-
+          
       - name: Build signed APK
         env:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
@@ -58,10 +51,11 @@ jobs:
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
         run: |
           cd cordova-app
-          cordova build android --release -- --keystore=worktime-release.keystore --storePassword=$KEYSTORE_PASSWORD --alias=$KEY_ALIAS --password=$KEY_PASSWORD
+          cordova build android --release --packageType=apk -- --keystore=worktime-release.keystore --storePassword=$KEYSTORE_PASSWORD --alias=$KEY_ALIAS --password=$KEY_PASSWORD
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: apk
-          path: cordova-app/platforms/android/app/build/outputs/apk/release/*.apk
+          name: android-release
+          path: cordova-app/platforms/android/app/build/outputs/**/release/*.*
+
