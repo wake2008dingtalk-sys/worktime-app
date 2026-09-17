@@ -51,11 +51,7 @@ jobs:
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
         run: |
           cd cordova-app
-          cordova build android --release --packageType=apk -- --keystore=worktime-release.keystore --storePassword=$KEYSTORE_PASSWORD --alias=$KEY_ALIAS --password=$KEY_PASSWORD
+          KEYSTORE_PATH=$(pwd)/worktime-release.keystore
+          cordova build android --release --packageType=apk -- --keystore=$KEYSTORE_PATH --storePassword=$KEYSTORE_PASSWORD --alias=$KEY_ALIAS --password=$KEY_PASSWORD
 
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: android-release
-          path: cordova-app/platforms/android/app/build/outputs/**/release/*.*
 
