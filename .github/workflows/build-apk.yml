@@ -68,6 +68,7 @@ jobs:
           cd cordova-app
           cordova build android --release
 
+      
       - name: Sign APK
         env:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
@@ -78,9 +79,14 @@ jobs:
           BUILD_TOOLS=$(ls -d $ANDROID_HOME/build-tools/* | sort -V | tail -1)
           UNSIGNED_APK=cordova-app/platforms/android/app/build/outputs/apk/release/app-release-unsigned.apk
           SIGNED_APK=cordova-app/platforms/android/app/build/outputs/apk/release/app-release.apk
-          KEYSTORE=cordova-app/worktime-release.keystore
-          jarsigner -verbose -sigalg SHA256withRSA -digestalg SHA-256 -keystore $KEYSTORE -storepass $KEYSTORE_PASSWORD -keypass $KEY_PASSWORD $UNSIGNED_APK $KEY_ALIAS
-          $BUILD_TOOLS/zipalign -v 4 $UNSIGNED_APK $SIGNED_APK
+          KEYSTORE=$(pwd)/cordova-app/worktime-release.keystore
+          # 第一步：先 zipalign 对齐（未签名 → 对齐后的 APK）
+          $BUILD_TOOLS/zipalign -p -f -v 4 $UNSIGNED_APK $SIGNED_APK
+          # 第二步：再用 apksigner 签名（生成 V2 签名，现代 Android 兼容）
+          $BUILD_TOOLS/apksigner sign --ks $KEYSTORE --ks-pass pass:$KEYSTORE_PASSWORD --key-pass pass:$KEY_PASSWORD --ks-key-alias $KEY_ALIAS $SIGNED_APK
+          # 第三步：验证签名真的写入了（失败会直接报错，不会静默通过）
+          $BUILD_TOOLS/apksigner verify -v $SIGNED_APK || exit 1
+
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
