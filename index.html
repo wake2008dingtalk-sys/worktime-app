@@ -4045,8 +4045,12 @@ function initAIChat() {
         // 直接与数字比较恒为 false 导致云端更新永不生效——统一转为时间戳再比较
         const cloudSettingsTs = settings && settings.updatedAt ? new Date(settings.updatedAt).getTime() || 0 : 0;
 
+        // v111fix4：本地 _cloudUpdatedAt 可能是旧版本原样存入的 ISO 字符串，
+        // 数字与字符串比较恒 false——比较前同样归一化为时间戳
+        const localCloudTs = DB._cloudUpdatedAt ? (typeof DB._cloudUpdatedAt === "number" ? DB._cloudUpdatedAt : new Date(DB._cloudUpdatedAt).getTime() || 0) : 0;
+
         // 更新设置（以云端为准，如果云端更新）
-        if (settings && cloudSettingsTs > (DB._cloudUpdatedAt || 0)) {
+        if (settings && cloudSettingsTs > localCloudTs) {
           DB.workPlace = settings.workPlace || DB.workPlace;
           DB.fenceRadius = settings.fenceRadius || DB.fenceRadius;
           DB.dailyStartTime = settings.dailyStartTime || DB.dailyStartTime;
