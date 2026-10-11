@@ -4041,8 +4041,12 @@ function initAIChat() {
       if (res.code === 0 && res.data) {
         const { settings, records } = res.data;
 
+        // v111fix3：云端 updatedAt 是 Date 对象，JSON 传输后变为 ISO 字符串，
+        // 直接与数字比较恒为 false 导致云端更新永不生效——统一转为时间戳再比较
+        const cloudSettingsTs = settings && settings.updatedAt ? new Date(settings.updatedAt).getTime() || 0 : 0;
+
         // 更新设置（以云端为准，如果云端更新）
-        if (settings && settings.updatedAt > (DB._cloudUpdatedAt || 0)) {
+        if (settings && cloudSettingsTs > (DB._cloudUpdatedAt || 0)) {
           DB.workPlace = settings.workPlace || DB.workPlace;
           DB.fenceRadius = settings.fenceRadius || DB.fenceRadius;
           DB.dailyStartTime = settings.dailyStartTime || DB.dailyStartTime;
@@ -4058,7 +4062,7 @@ function initAIChat() {
           DB.dailyEndTimeMap = settings.dailyEndTimeMap || DB.dailyEndTimeMap;
           DB.dailyBreakMap = settings.dailyBreakMap || DB.dailyBreakMap;
           DB.dailyHoursMap = settings.dailyHoursMap || DB.dailyHoursMap;
-          DB._cloudUpdatedAt = settings.updatedAt;
+          DB._cloudUpdatedAt = cloudSettingsTs;
           // v107修复：云端设置落地后重置指纹与脏标记，避免把刚下载的设置当作用户修改回传覆盖
           _lastSettingsFp = settingsFingerprint(); _settingsDirty = false;
           saveDB();
@@ -4074,6 +4078,8 @@ function initAIChat() {
           records.forEach(r => {
             if (!r || typeof r.time !== "number") return;
             if (!r.dateKey) r.dateKey = dateKey(new Date(r.time));
+            // v111fix3：updatedAt 可能为 ISO 字符串（云端 Date 序列化），归一化为时间戳
+            if (r.updatedAt && typeof r.updatedAt !== "number") r.updatedAt = new Date(r.updatedAt).getTime() || 0;
             if (!r.updatedAt) r.updatedAt = r.time;
             const key = `${r.dateKey}_${r.type}_${r.time}`;
             const localIdx = DB.records.findIndex(x =>
