@@ -3840,6 +3840,9 @@ function initAIChat() {
 
   // 初始化设备ID
   ensureDeviceId();
+  // v111fix：启动时恢复云同步登录态（此前 initCloudSync 未被调用，
+  // 重启后 isLoggedIn 永远 false → 显示未绑定 + 自动同步不启动 → 双端数据不通）
+  initCloudSync();
 
   // 微信扫码登录：生成二维码让小程序扫描绑定
   function generateBindQR() {
@@ -4159,8 +4162,7 @@ function initAIChat() {
     }
   }
 
-  // 在 init() 中调用
-  // initCloudSync(); // 在合适的位置调用
+  // initCloudSync() 已在页面初始化时调用（ensureDeviceId 之后）
 
   /* ===================== 绑定UI ===================== */
   // 在设置面板中添加绑定入口
