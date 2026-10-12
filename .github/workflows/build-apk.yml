@@ -1550,7 +1550,7 @@ jobs:
           $ANDROID_HOME/build-tools/34.0.0/zipalign -p 4 "$UNSIGNED" /tmp/aligned.apk
           $ANDROID_HOME/build-tools/34.0.0/apksigner sign \
             --ks /tmp/release.keystore --ks-key-alias "$KEY_ALIAS" \
-            --ks-pass pass:"$KEYSTORE_PASSWORD" --key-pass pass:"$KEY_PASSWORD" \
+            --ks-pass pass:"$KEYSTORE_PASSWORD" \
             --out android/app/build/outputs/apk/release/worktime-release.apk /tmp/aligned.apk
           $ANDROID_HOME/build-tools/34.0.0/apksigner verify --print-certs android/app/build/outputs/apk/release/worktime-release.apk | head -5
         env:
