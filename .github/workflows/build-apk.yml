@@ -1541,11 +1541,29 @@ jobs:
           python3 /tmp/register_plugin.py
           cd android
           ./gradlew assembleDebug
+          ./gradlew assembleRelease
+
+      - name: Sign release APK
+        run: |
+          echo "$KEYSTORE_BASE64" | base64 -d > /tmp/release.keystore
+          UNSIGNED=$(ls android/app/build/outputs/apk/release/*-unsigned.apk | head -1)
+          $ANDROID_HOME/build-tools/34.0.0/zipalign -p 4 "$UNSIGNED" /tmp/aligned.apk
+          $ANDROID_HOME/build-tools/34.0.0/apksigner sign \
+            --ks /tmp/release.keystore --ks-key-alias "$KEY_ALIAS" \
+            --ks-pass pass:"$KEYSTORE_PASSWORD" --key-pass pass:"$KEY_PASSWORD" \
+            --out android/app/build/outputs/apk/release/worktime-release.apk /tmp/aligned.apk
+          $ANDROID_HOME/build-tools/34.0.0/apksigner verify --print-certs android/app/build/outputs/apk/release/worktime-release.apk | head -5
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
 
       - name: Package and release
         run: |
           mkdir -p release
           cp android/app/build/outputs/apk/debug/*.apk release/worktime-tracker.apk
+          cp android/app/build/outputs/apk/release/worktime-release.apk release/worktime-release.apk
           ls -la release/
 
       - name: Upload APK as artifact
@@ -1554,6 +1572,13 @@ jobs:
           name: worktime-tracker-debug
           path: android/app/build/outputs/apk/debug/*.apk
           retention-days: 7
+
+      - name: Upload release APK as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: worktime-release-signed
+          path: android/app/build/outputs/apk/release/worktime-release.apk
+          retention-days: 30
 
       - name: Create GitHub Release with APK
         if: github.event_name == 'push'
@@ -1576,7 +1601,9 @@ jobs:
             - 后台持续定位
             - 工时统计与收入计算
             - 打卡通知提醒
-          files: release/worktime-tracker.apk
+          files: |
+            release/worktime-tracker.apk
+            release/worktime-release.apk
           generate_release_notes: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
