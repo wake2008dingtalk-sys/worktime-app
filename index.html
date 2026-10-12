@@ -3929,10 +3929,26 @@ function initAIChat() {
     }
 
     // 方式2：CloudBase Web SDK（匿名登录 + callFunction）
-    await _ensureCloudbase();
-    if (!_cbApp) throw new Error("CloudBase SDK 未加载");
-    const res = await _cbApp.callFunction({ name: functionName, data: data });
-    return res.result;
+    try {
+      await _ensureCloudbase();
+      if (!_cbApp) throw new Error("CloudBase SDK 未加载");
+      const res = await _cbApp.callFunction({ name: functionName, data: data });
+      window._lastCloudErr = null;
+      return res.result;
+    } catch (e) {
+      // v111fix5：记录真实错误供诊断 toast 显示
+      window._lastCloudErr = (e && (e.message || e.errMsg || e.code)) ? String(e.message || e.errMsg || e.code) : String(e);
+      // 若是登录态问题，清空 SDK 缓存的会话键，下次调用强制重新匿名登录
+      if (window._lastCloudErr.indexOf("登录") >= 0 || window._lastCloudErr.indexOf("auth") >= 0 || window._lastCloudErr.indexOf("credential") >= 0 || window._lastCloudErr.indexOf("CREDENTIAL") >= 0) {
+        try {
+          Object.keys(localStorage).forEach(k => {
+            if (/cloudbase|tcb|@cloudbase/i.test(k)) localStorage.removeItem(k);
+          });
+          _cbApp = null; _cbReady = null;
+        } catch (_) {}
+      }
+      throw e;
+    }
   }
 
   // 同步设置到云端
@@ -4215,11 +4231,19 @@ function initAIChat() {
         </div>
       `;
       $("#btn-check-bind").addEventListener("click", async () => {
-        const res = await checkBindStatus();
-        if (res) {
-          renderCloudBindStatus();
-        } else {
-          toast("尚未绑定，请在小程序中输入绑定码", "warn");
+        toast("正在查询云端...", "ok", 1200);
+        try {
+          const res = await checkBindStatus();
+          if (res) {
+            renderCloudBindStatus();
+          } else if (window._lastCloudErr) {
+            // v111fix5：诊断模式——把真实云端报错显示出来
+            toast("云端调用失败: " + window._lastCloudErr, "warn", 6000);
+          } else {
+            toast("云端返回：该码未绑定（请核对小程序输入的是否为此码）", "warn", 4000);
+          }
+        } catch (e) {
+          toast("异常: " + (e && e.message ? e.message : e), "warn", 6000);
         }
       });
     }
