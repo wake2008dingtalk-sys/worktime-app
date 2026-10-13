@@ -3599,11 +3599,73 @@ setInterval(() => {
                 saveDB();
                 renderAll();
                 toast(ev && ev.type === "out" ? "已自动签退下班" : "已自动签到上班", "ok");
+                // v111fix7：早退检测——签退时间早于设置下班（10分钟宽限）时询问用户
+                if (ev && ev.type === "out") maybePromptEarlyLeave(Date.now());
                 if (window.CloudSync && typeof window.CloudSync.onRecordChange === 'function') window.CloudSync.onRecordChange();
               }).catch(function(e) { Logger.error("signEvent reload:", e); });
             });
           }
         } catch (e) { Logger.error("signEvent listener:", e); }
+
+        // v111fix7：早退检测与确认流程
+        // 签退时间早于设置下班时间（留 10 分钟宽限）→ 通知询问用户是否早退
+        // 用户确认早退 → 将当天下班时间改为实际离开时间（工时按新时间计算）；保持设置则不改动
+        window.maybePromptEarlyLeave = function(outTs) {
+          try {
+            const dk = dateKey(new Date(outTs));
+            const { endMs } = getWorkTimesForDate(dk);
+            if (outTs >= endMs - 10 * 60000) return; // 未早于设置下班，不打扰
+            localStorage.setItem("pending_early_leave", JSON.stringify({ dk: dk, outTs: outTs, setEnd: endMs }));
+            if (document.hidden) {
+              // App 在后台：发本地通知，用户点开 App 后弹确认
+              try {
+                window.Capacitor.Plugins.LocalNotifications.schedule({
+                  notifications: [{
+                    id: 2001,
+                    title: "检测到可能早退",
+                    body: "您 " + fmtTime(outTs) + " 离开工地，早于设置下班时间 " + fmtTime(endMs) + "，点开应用确认是否早退。",
+                    schedule: { at: new Date(Date.now() + 2000) }
+                  }]
+                });
+              } catch (ne) { Logger.error("earlyLeave notify:", ne); }
+            } else {
+              window.showEarlyLeaveDialog();
+            }
+          } catch (e) { Logger.error("maybePromptEarlyLeave:", e); }
+        };
+        window.showEarlyLeaveDialog = function() {
+          try {
+            const raw = localStorage.getItem("pending_early_leave");
+            if (!raw) return;
+            const info = JSON.parse(raw);
+            localStorage.removeItem("pending_early_leave");
+            const outStr = fmtTime(info.outTs), setStr = fmtTime(info.setEnd);
+            const isEarly = confirm("今天 " + outStr + " 离开工地，早于设置下班时间 " + setStr + "。\n\n是否早退？\n【确定】= 早退，当天下班时间改为 " + outStr + "（工时按新时间算）\n【取消】= 未早退，保持 " + setStr + " 不变");
+            if (isEarly) {
+              DB.dailyEndTimeMap = DB.dailyEndTimeMap || {};
+              DB.dailyEndTimeMap[info.dk] = outStr;
+              saveDB();
+              renderAll();
+              toast("已确认早退：当天下班时间改为 " + outStr + "，工时已重新计算", "ok", 6000);
+              // 通知云同步把改动后的按日班次设置同步出去
+              try {
+                if (window.CloudSync && window.CloudSync.markSettingsDirty) {
+                  window.CloudSync.markSettingsDirty();
+                  window.CloudSync.syncSettingsToCloud();
+                }
+              } catch (se) { Logger.error("earlyLeave sync:", se); }
+            } else {
+              toast("已按设置下班时间 " + setStr + " 记录", "ok", 4000);
+            }
+          } catch (e) { Logger.error("showEarlyLeaveDialog:", e); }
+        };
+        // App 从后台回到前台：有待确认的早退提示则弹出
+        document.addEventListener("visibilitychange", function() {
+          if (!document.hidden && localStorage.getItem("pending_early_leave")) {
+            setTimeout(function() { window.showEarlyLeaveDialog(); }, 800);
+          }
+        });
+
         // v108: 后台定位权限引导（Android 10+ 需在系统设置手动开「始终允许」，否则后台拿不到定位）
         try {
           const bgPrompted = localStorage.getItem("bg_loc_prompted");
@@ -4293,6 +4355,8 @@ function initAIChat() {
     syncFromCloud: syncFromCloud,
     syncRecordsToCloud: syncRecordsToCloud,
     syncSettingsToCloud: syncSettingsToCloud,
+    // v111fix7：供早退确认流程标记设置变更（dailyEndTimeMap 改动需同步）
+    markSettingsDirty: function() { _settingsDirty = true; },
     bidirectionalSync: bidirectionalSync,
     renderCloudBindStatus: renderCloudBindStatus,
     checkBindStatus: checkBindStatus
