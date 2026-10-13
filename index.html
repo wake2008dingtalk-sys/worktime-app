@@ -1001,6 +1001,9 @@ function computeShifts(records, dayStart, dayEnd, breakMinutes) {
   const outRs = records.filter(r => !r.deleted && r.time >= dayStart && r.time < dayEnd && r.type === "out").sort((a,
       b) => a.time - b.time);
   const shifts = [];
+  // v111fix6（方案A）：设置班次时间提前取，配对班次的工时也一律按设置时间计算
+  const { startMs: setStartMs, endMs: setEndMs } = getWorkTimesForDate(dateKey(new Date(dayStart + 86400000 / 2)));
+  const setMin = Math.max(0, (setEndMs - setStartMs) / 60000);
   let outIdx = 0;
   inRs.forEach(rIn => {
     while (outIdx < outRs.length && outRs[outIdx].time <= rIn.time) outIdx++;
@@ -1009,7 +1012,8 @@ function computeShifts(records, dayStart, dayEnd, breakMinutes) {
       outIdx++; // 消费该下班记录：同一天第二个上班不会再配到它
       const rawMin = Math.max(0, (out.time - rIn.time) / 60000);
       const breakMin = breakMinutes || 0;
-      const minutes = Math.max(0, rawMin - breakMin);
+      // 方案A：工时一律按设置时间（设置下班-设置上班-午休），早到/晚退均不增减
+      const minutes = Math.max(0, setMin - breakMin);
       shifts.push({ in: rIn.time, out: out.time, minutes, rawMinutes: rawMin, breakMinutes: breakMin, distIn:
           rIn.dist || null, distOut: out.dist || null });
     }
@@ -1017,7 +1021,6 @@ function computeShifts(records, dayStart, dayEnd, breakMinutes) {
   // 未配对的上班记录：用该日期的设置下班时间补全，且工时必须按设置上班时间计算
   // v107修复：改用 getWorkTimesForDate(dayKey)——此前历史日期误用"今天"的班次设置
   const pairedIn = new Set(shifts.map(s => s.in));
-  const { startMs: setStartMs, endMs: setEndMs } = getWorkTimesForDate(dayKey);
   inRs.forEach(rIn => {
     if (!pairedIn.has(rIn.time)) {
       const endOfDay = Math.min(setEndMs, dayEnd);
