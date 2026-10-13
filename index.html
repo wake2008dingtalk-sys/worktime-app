@@ -3640,13 +3640,18 @@ setInterval(() => {
             const info = JSON.parse(raw);
             localStorage.removeItem("pending_early_leave");
             const outStr = fmtTime(info.outTs), setStr = fmtTime(info.setEnd);
-            const isEarly = confirm("今天 " + outStr + " 离开工地，早于设置下班时间 " + setStr + "。\n\n是否早退？\n【确定】= 早退，当天下班时间改为 " + outStr + "（工时按新时间算）\n【取消】= 未早退，保持 " + setStr + " 不变");
+            const isEarly = confirm("今天 " + outStr + " 离开工地，早于设置下班时间 " + setStr + "。\n\n是否早退？\n【确定】= 早退，自行修改当天下班时间\n【取消】= 未早退，保持 " + setStr + " 不变");
             if (isEarly) {
+              // v111fix7：用户自定义修改当天下班时间（默认填实际离开时间，可自行改成任意时间）
+              let newEnd = prompt("请输入当天下班时间（24小时制 HH:mm）", outStr);
+              if (newEnd === null) { toast("未修改，仍按设置时间 " + setStr + " 记录", "warn", 4000); return; }
+              newEnd = String(newEnd).trim();
+              if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(newEnd)) { toast("时间格式不对（应为 HH:mm，如 18:30），未修改", "warn", 5000); return; }
               DB.dailyEndTimeMap = DB.dailyEndTimeMap || {};
-              DB.dailyEndTimeMap[info.dk] = outStr;
+              DB.dailyEndTimeMap[info.dk] = newEnd;
               saveDB();
               renderAll();
-              toast("已确认早退：当天下班时间改为 " + outStr + "，工时已重新计算", "ok", 6000);
+              toast("当天下班时间已改为 " + newEnd + "，工时已重新计算", "ok", 6000);
               // 通知云同步把改动后的按日班次设置同步出去
               try {
                 if (window.CloudSync && window.CloudSync.markSettingsDirty) {
