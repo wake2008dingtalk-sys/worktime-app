@@ -224,6 +224,28 @@ main{padding:14px;max-width:720px;margin:0 auto;padding-bottom:80px}
 .month-table .no-data{color:var(--faint);padding:12px;text-align:center;font-size:12px}
 .empty{color:var(--faint);text-align:center;padding:20px 0;font-size:13px}
 
+/* v111fix8：表格纯白底色方案（覆盖暗色主题中的表格区域） */
+/* 记录表 + 统计表：底色纯白，文字深灰，边框浅灰，斑马纹淡灰 */
+#rec-table,.tbl{background:#ffffff;color:#1f2937}
+#rec-table th,.tbl th{color:#374151;border-bottom:1px solid #d1d5db}
+#rec-table td,.tbl td{color:#1f2937;border-bottom:1px solid #e5e7eb;background:#ffffff}
+#rec-table tr:hover td,.tbl tr:hover td{background:#e0f2fe}
+#rec-table .tag.in,.tbl .tag.in{background:#d1fae5;color:#047857}
+#rec-table .tag.out,.tbl .tag.out{background:#fef3c7;color:#92400e}
+#rec-table .tag.late,.tbl .tag.late{color:#b91c1c}
+#rec-table .tag.ontime,.tbl .tag.ontime{color:#047857}
+#rec-table .pay-cell,.tbl .pay-cell{color:#047857}
+.tbl .sum-row td{background:#ecfdf5;color:#065f46;border-top:1px solid #a7f3d0}
+/* 月度统计表：同套纯白方案 */
+.month-table thead th{background:#e0f2fe;color:#0e7490;border:1px solid #cbd5e1}
+.month-table tbody td{background:#ffffff;color:#1f2937;border:1px solid #e5e7eb}
+.month-table tbody tr:nth-child(even){background:#f8fafc}
+.month-table tbody tr:hover{background:#e0f2fe}
+.month-table .money-cell{color:#0e7490}
+.month-table .sum-row td{background:#ecfdf5;color:#065f46;border-top:1px solid #a7f3d0}
+.month-table .sum-row .money-cell{color:#0e7490}
+.month-table .no-data{color:#6b7280}
+
 /* period tabs */
 .period-tabs{display:flex;gap:6px;margin-bottom:10px;background:var(--panel2);padding:4px;border:
     1px solid var(--line);border-radius:10px;width:fit-content}
