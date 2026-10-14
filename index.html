@@ -1055,7 +1055,17 @@ function computeShifts(records, dayStart, dayEnd, breakMinutes) {
           rIn.dist || null, distOut: null });
     }
   });
-  return shifts.sort((a, b) => a.in - b.in);
+  // v111fix9：每日工时封顶——方案A下每个班次都按设置算满，
+  // 同一天多个班次（补录/重复打卡）会导致工时翻倍；
+  // 封顶规则：全天各班次工时合计 ≤ 设置工时（设置班次时长-午休）
+  const sorted = shifts.sort((a, b) => a.in - b.in);
+  const dayCap = Math.max(0, setMin - (breakMinutes || 0));
+  let remaining = dayCap;
+  sorted.forEach(s => {
+    s.minutes = Math.min(s.minutes, Math.max(0, remaining));
+    remaining -= s.minutes;
+  });
+  return sorted;
 }
 function getDailyBreakMinutes(db, dayKey) {
   if (db.dailyBreakMap && db.dailyBreakMap[dayKey] !== undefined) {
@@ -3272,6 +3282,9 @@ $("#add-save").addEventListener("click", () => {
   if (isNaN(newTime)) { toast("时间格式错误", "warn"); return; }
   const dk = dateKey(new Date(newTime));
   const rec = {
+    // v111fix9：补录记录补齐 id/updatedAt——缺 id 导致云同步合并键退化为时间键，
+    // 缺 updatedAt 导致被云端下载的同键旧记录覆盖（补录"消失"的根因）
+    id: "r" + newTime.toString(36) + Math.random().toString(36).slice(2, 5),
     dateKey: dk,
     type: type,
     time: newTime,
@@ -3279,17 +3292,20 @@ $("#add-save").addEventListener("click", () => {
     lng: DB.workPlace ? DB.workPlace.lng : 0,
     acc: 0,
     source: "manual",
-    deviceId: "web_manual"
+    deviceId: "web_manual",
+    updatedAt: Date.now()
   };
-  // 检查同一天是否已有同类型记录，有则覆盖
-  const sameDaySameType = DB.records.filter(r => r.dateKey === dk && r.type === type);
+  // 检查同一天是否已有同类型记录，有则软删除覆盖（v111fix9：改软删除，墓碑随云同步传播，
+  // 此前硬删除会在下次云端下载时"复活"旧记录）
+  const sameDaySameType = DB.records.filter(r => r.dateKey === dk && r.type === type && !r.deleted);
   if (sameDaySameType.length > 0) {
-    // 删除旧的同类型记录
-    DB.records = DB.records.filter(r => !(r.dateKey === dk && r.type === type));
+    sameDaySameType.forEach(r => { r.deleted = true; r.updatedAt = Date.now(); });
   }
   DB.records.unshift(rec);
   if (!saveDB()) { toast("保存失败：浏览器限制了本地存储", "bad"); return; }
   renderAll();
+  // v111fix9：补录后立即触发云同步上传（此前不触发，重启被云端旧数据覆盖）
+  if (window.CloudSync && typeof window.CloudSync.onRecordChange === 'function') window.CloudSync.onRecordChange();
   $("#dlg-add-record").classList.remove("show");
   toast(type === "in" ? "已补录上班打卡" : "已补录下班打卡", "ok");
 });
