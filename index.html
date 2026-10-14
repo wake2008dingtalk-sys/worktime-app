@@ -1018,14 +1018,19 @@ function getDailyTargetMinutes(db, dayKey) {
 function computeShifts(records, dayStart, dayEnd, breakMinutes) {
   const dayKey = dateKey(new Date(dayStart + 86400000 / 2));
   // v107修复：过滤软删除记录；下班记录按序消费，避免多个上班配对同一个下班（双计工时）
+  // v111fix10：下班记录窗口扩至次日6小时——跨午夜班次（如22:00下班设06:00）的下班打卡落在次日，
+  // 此前按0点硬切导致夜班下半段丢失
   const inRs = records.filter(r => !r.deleted && r.time >= dayStart && r.time < dayEnd && r.type === "in").sort((a,
       b) => a.time - b.time);
-  const outRs = records.filter(r => !r.deleted && r.time >= dayStart && r.time < dayEnd && r.type === "out").sort((a,
+  const outRs = records.filter(r => !r.deleted && r.time >= dayStart && r.time < dayEnd + 6 * 3600000 && r.type === "out").sort((a,
       b) => a.time - b.time);
   const shifts = [];
   // v111fix6（方案A）：设置班次时间提前取，配对班次的工时也一律按设置时间计算
   const { startMs: setStartMs, endMs: setEndMs } = getWorkTimesForDate(dateKey(new Date(dayStart + 86400000 / 2)));
   const setMin = Math.max(0, (setEndMs - setStartMs) / 60000);
+  // v111fix10：封顶值与统计页目标工时同源（getDailyTargetMinutes），
+  // 此前直接用 setMin-breakMinutes，在 dailyEndTime 缺失（按 dailyHours 推算）等场景与显示/目标口径不一致
+  const capMin = Math.min(setMin, getDailyTargetMinutes(DB, dateKey(new Date(dayStart + 86400000 / 2))));
   let outIdx = 0;
   inRs.forEach(rIn => {
     while (outIdx < outRs.length && outRs[outIdx].time <= rIn.time) outIdx++;
@@ -1059,7 +1064,7 @@ function computeShifts(records, dayStart, dayEnd, breakMinutes) {
   // 同一天多个班次（补录/重复打卡）会导致工时翻倍；
   // 封顶规则：全天各班次工时合计 ≤ 设置工时（设置班次时长-午休）
   const sorted = shifts.sort((a, b) => a.in - b.in);
-  const dayCap = Math.max(0, setMin - (breakMinutes || 0));
+  const dayCap = Math.max(0, capMin - (breakMinutes || 0));
   let remaining = dayCap;
   sorted.forEach(s => {
     s.minutes = Math.min(s.minutes, Math.max(0, remaining));
@@ -3079,6 +3084,13 @@ function baiduJsonp(url) {
       if (s.parentNode) s.parentNode.removeChild(s);
     }
     window[cb] = function(data) { cleanup(); resolve(data); };
+    // v111fix10：脚本只能从百度域名加载，校验 URL 主机防回调被任意源劫持
+    try {
+      const u = new URL(url);
+      if (u.hostname !== "api.map.baidu.com" && u.hostname !== "map.baidu.com") {
+        cleanup(); reject(new Error("bad jsonp host: " + u.hostname)); return;
+      }
+    } catch (e) { cleanup(); reject(new Error("bad jsonp url")); return; }
     s.src = url + (url.indexOf("?") >= 0 ? "&" : "?") + "callback=" + cb;
     s.onerror = function() { cleanup(); reject(new Error("network")); };
     document.head.appendChild(s);
