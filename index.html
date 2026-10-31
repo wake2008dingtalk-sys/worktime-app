@@ -684,10 +684,75 @@ main{padding:14px;max-width:720px;margin:0 auto;padding-bottom:80px}
         <a href="https://github.com/wake2008dingtalk-sys/KY/releases" class="fbtn" style="text-decoration:none" target="_blank">📋 查看所有版本</a>
       </div>
     </div>
+    <!-- 关于与合规（应用商店审核要求：隐私政策必须在应用内可随时访问） -->
+    <div class="set-row" style="margin-top:12px;border-top:1px solid var(--line);padding-top:12px">
+      <label>关于与合规</label>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <button class="fbtn" id="btn-privacy">📄 隐私政策</button>
+        <button class="fbtn" id="btn-terms">📄 用户协议</button>
+        <span id="app-ver-label" style="color:var(--faint);font-size:12px">版本 1.0.1</span>
+      </div>
+    </div>
+    <div class="set-row">
+      <label>第三方服务</label>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <button class="fbtn" id="btn-sdk-list">🔌 查看第三方 SDK 清单</button>
+      </div>
+    </div>
+    <div class="hint" style="margin-top:4px">
+      开发者邮箱：<span id="dev-email-label">待填写（上架前请告知你的真实邮箱）</span>　包名：com.worktime.tracker
+    </div>
     <div style="height:40px"></div>
   </div>
 </div>
 
+
+<!-- 隐私政策与服务条款首次同意弹窗（v1.0.1 商店合规：不默认勾选、可随时在设置中查阅） -->
+<div class="dlg-mask" id="dlg-privacy">
+  <div class="dlg" style="max-width:430px">
+    <h3>隐私政策与服务条款</h3>
+    <div class="hint" style="text-align:left;line-height:1.85;max-height:52vh;overflow:auto">
+      感谢您使用 <b>WorkTime</b>。在开始使用前，请先阅读并同意以下内容：<br>
+      · <b>《隐私政策》</b>：说明我们会申请哪些权限、数据存在哪里、是否上传。<br>
+      · <b>《用户协议》</b>：说明本工具的使用范围与责任边界。<br><br>
+      <b>核心结论先说：</b>您的打卡记录默认<b>只存在您自己的手机上</b>，我们不收集、不上传、不分享您的任何个人信息；
+      地图、云端同步、AI 助手三项服务由您自主选择是否开启，开启后才会有对应数据交互。<br><br>
+      点击“同意并继续”表示您已完整阅读并同意上述条款；点击“不同意”将退出应用。
+      <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+        <button class="fbtn" id="privacy-open-policy">📄 阅读隐私政策</button>
+        <button class="fbtn" id="privacy-open-terms">📄 阅读用户协议</button>
+      </div>
+    </div>
+    <div class="dlg-actions">
+      <button class="fbtn" id="privacy-disagree">不同意</button>
+      <button class="fbtn primary" id="privacy-agree">同意并继续</button>
+    </div>
+  </div>
+</div>
+
+<!-- 第三方 SDK 清单弹窗 -->
+<div class="dlg-mask" id="dlg-sdk">
+  <div class="dlg" style="max-width:430px">
+    <h3>第三方服务清单</h3>
+    <div class="hint" style="text-align:left;line-height:1.85;max-height:52vh;overflow:auto">
+      本应用未集成任何广告、统计、埋点类 SDK。仅在您主动使用相关功能时涉及以下第三方服务：<br><br>
+      <b>1. 百度地图开放平台</b>（lbsyun.baidu.com）<br>
+      　用途：地图显示、地点检索、坐标转换、唤起导航。<br>
+      　涉及数据：设备网络信息、您检索的地名关键词、您选点的坐标。<br><br>
+      <b>2. 腾讯云开发 CloudBase</b>（tencentcloud.com）<br>
+      　用途：可选功能「云端同步 / 微信小程序绑定」，用于多端数据同步。<br>
+      　涉及数据：您自主上传的打卡记录与设置项。<br>
+      　说明：不开启则完全不传输任何数据。<br><br>
+      <b>3. 您自行配置的第三方大模型服务</b>（如智谱 AI）<br>
+      　用途：可选功能「AI 工时助手」。<br>
+      　涉及数据：您发送的对话内容<br>
+      　说明：不配置则不启用、不传输任何数据。
+    </div>
+    <div class="dlg-actions">
+      <button class="fbtn primary" id="sdk-close">知道了</button>
+    </div>
+  </div>
+</div>
 
 <!-- 按天设置弹窗 -->
 <div class="dlg-mask" id="dlg-daily">
@@ -4419,6 +4484,89 @@ function initAIChat() {
 }
 
 </script>
+<!-- v1.0.1 商店合规模块：隐私政策/用户协议/第三方SDK清单 -->
+<script>
+(function () {
+  var PRIVACY_URL = "https://wake2008dingtalk-sys.github.io/worktime/";
+  var TERMS_URL = "https://wake2008dingtalk-sys.github.io/worktime/terms.html";
+  var AGREE_KEY = "privacy_agreed_v1";
+
+  var $ = function (id) { return document.getElementById(id); };
+
+  // 跳转外链：原生环境用 intent 交给系统浏览器；网页环境直接新窗口
+  function openExternal(url) {
+    try {
+      var isNative = !!(window.Capacitor && window.Capacitor.Plugins);
+      if (isNative) {
+        window.location.href = "intent:#Intent;action=android.intent.action.VIEW;data=" +
+          encodeURIComponent(url) + ";end";
+        return;
+      }
+    } catch (e) { /* 忽略，走下面兜底 */ }
+    try { window.open(url, "_blank", "noopener"); }
+    catch (e) { window.location.href = url; }
+  }
+
+  function openPrivacy() { openExternal(PRIVACY_URL); }
+  function openTerms() { openExternal(TERMS_URL); }
+
+  function exitApp() {
+    try {
+      if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.App &&
+          window.Capacitor.Plugins.App.exitApp) { window.Capacitor.Plugins.App.exitApp(); return; }
+    } catch (e) { /* noop */ }
+    try { if (navigator.app && navigator.app.exitApp) { navigator.app.exitApp(); return; } } catch (e) { /* noop */ }
+    if (window.close) { window.close(); }
+  }
+
+  function maybeShowPrivacy() {
+    try {
+      if (localStorage.getItem(AGREE_KEY) === "1") return;
+    } catch (e) { /* 无 localStorage 时不阻塞使用 */ return; }
+    var dlg = $("dlg-privacy");
+    if (!dlg) return;
+    dlg.classList.add("show");
+  }
+
+  function bindUI() {
+    var agree = $("privacy-agree"), disagree = $("privacy-disagree"), dlg = $("dlg-privacy");
+    if (agree) agree.addEventListener("click", function () {
+      try { localStorage.setItem(AGREE_KEY, "1"); } catch (e) { /* noop */ }
+      if (dlg) dlg.classList.remove("show");
+    });
+    if (disagree) disagree.addEventListener("click", function () {
+      alert("您未同意隐私政策，应用将退出。再次打开仍可查看《隐私政策》后再决定。");
+      exitApp();
+    });
+    var p1 = $("privacy-open-policy"); if (p1) p1.addEventListener("click", openPrivacy);
+    var p2 = $("privacy-open-terms"); if (p2) p2.addEventListener("click", openTerms);
+
+    var b1 = $("btn-privacy"); if (b1) b1.addEventListener("click", openPrivacy);
+    var b2 = $("btn-terms"); if (b2) b2.addEventListener("click", openTerms);
+
+    var sdkBtn = $("btn-sdk-list"), sdkDlg = $("dlg-sdk"), sdkClose = $("sdk-close");
+    if (sdkBtn && sdkDlg) sdkBtn.addEventListener("click", function () { sdkDlg.classList.add("show"); });
+    if (sdkClose && sdkDlg) sdkClose.addEventListener("click", function () { sdkDlg.classList.remove("show"); });
+    if (sdkDlg) sdkDlg.addEventListener("click", function (e) {
+      if (e.target === sdkDlg) sdkDlg.classList.remove("show");
+    });
+
+    // 版本号展示（供应用商店截图与自查）
+    var v = $("app-ver-label"); if (v) v.textContent = "版本 " + (window.APP_VERSION || "1.0.1");
+  }
+
+  function boot() {
+    bindUI();
+    // 延迟一点，避免与首屏其它弹窗抢焦点
+    setTimeout(maybeShowPrivacy, 600);
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", boot);
+  } else { boot(); }
+})();
+</script>
+
 <!-- AI chat overlay -->
 <div class="ai-chat-wrap" id="aiChatWrap">
   <div class="ai-ball" id="aiBall" title="AI 工时助手">🤖</div>
