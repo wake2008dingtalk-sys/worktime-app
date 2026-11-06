@@ -4774,6 +4774,11 @@ function initAIChat() {
         dailyEndTimeMap: DB.dailyEndTimeMap || {},
         dailyBreakMap: DB.dailyBreakMap || {},
         dailyHoursMap: DB.dailyHoursMap || {},
+        // v3：账面配置层随云同步（多设备/小程序端保持一致，避免历史快照与周几规则丢在单端）
+        dayConfigMap: DB.dayConfigMap || {},
+        weekdayRules: DB.weekdayRules || {},
+        billMode: DB.billMode || "shift",
+        vpnKeepAlive: DB.vpnKeepAlive || "manual",
         updatedAt: Date.now(),
         updatedBy: "apk"
       };
@@ -4881,6 +4886,11 @@ function initAIChat() {
           DB.dailyEndTimeMap = settings.dailyEndTimeMap || DB.dailyEndTimeMap;
           DB.dailyBreakMap = settings.dailyBreakMap || DB.dailyBreakMap;
           DB.dailyHoursMap = settings.dailyHoursMap || DB.dailyHoursMap;
+          // v3：恢复账面配置层（历史快照/周几规则/计费模式不因换设备或小程序中转丢失）
+          if (settings.dayConfigMap && typeof settings.dayConfigMap === "object") DB.dayConfigMap = settings.dayConfigMap;
+          if (settings.weekdayRules && typeof settings.weekdayRules === "object") DB.weekdayRules = settings.weekdayRules;
+          if (settings.billMode) DB.billMode = settings.billMode;
+          if (settings.vpnKeepAlive) DB.vpnKeepAlive = settings.vpnKeepAlive;
           DB._cloudUpdatedAt = cloudSettingsTs;
           // v107修复：云端设置落地后重置指纹与脏标记，避免把刚下载的设置当作用户修改回传覆盖
           _lastSettingsFp = settingsFingerprint(); _settingsDirty = false;
