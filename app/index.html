@@ -740,7 +740,7 @@ main{padding:14px;max-width:720px;margin:0 auto;padding-bottom:80px}
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
         <button class="fbtn" id="btn-privacy">📄 隐私政策</button>
         <button class="fbtn" id="btn-terms">📄 用户协议</button>
-        <span id="app-ver-label" style="color:var(--faint);font-size:12px">版本 1.0.1</span>
+        <span id="app-ver-label" style="color:var(--faint);font-size:12px">版本 1.1.5</span>
       </div>
     </div>
     <div class="set-row">
@@ -1774,7 +1774,7 @@ function resetDB() {
 }
 
 /* ===================== v3 功能实现（任务书第 4/5/7 批）===================== */
-const APP_VERSION = "1.1.0";
+var APP_VERSION = "1.1.5"; // v1.1.5：与小程序端版本号统一（var 声明才会挂到 window 上供底部版本标签读取）
 const WEEKDAY_NAMES = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
 
 // ---- 通用自绘弹层：确认 / 输入（替代系统 confirm/prompt）----
@@ -4774,6 +4774,11 @@ function initAIChat() {
         dailyEndTimeMap: DB.dailyEndTimeMap || {},
         dailyBreakMap: DB.dailyBreakMap || {},
         dailyHoursMap: DB.dailyHoursMap || {},
+        // v3：账面配置层随云同步（多设备/小程序端保持一致，避免历史快照与周几规则丢在单端）
+        dayConfigMap: DB.dayConfigMap || {},
+        weekdayRules: DB.weekdayRules || {},
+        billMode: DB.billMode || "shift",
+        vpnKeepAlive: DB.vpnKeepAlive || "manual",
         updatedAt: Date.now(),
         updatedBy: "apk"
       };
@@ -4881,6 +4886,11 @@ function initAIChat() {
           DB.dailyEndTimeMap = settings.dailyEndTimeMap || DB.dailyEndTimeMap;
           DB.dailyBreakMap = settings.dailyBreakMap || DB.dailyBreakMap;
           DB.dailyHoursMap = settings.dailyHoursMap || DB.dailyHoursMap;
+          // v3：恢复账面配置层（历史快照/周几规则/计费模式不因换设备或小程序中转丢失）
+          if (settings.dayConfigMap && typeof settings.dayConfigMap === "object") DB.dayConfigMap = settings.dayConfigMap;
+          if (settings.weekdayRules && typeof settings.weekdayRules === "object") DB.weekdayRules = settings.weekdayRules;
+          if (settings.billMode) DB.billMode = settings.billMode;
+          if (settings.vpnKeepAlive) DB.vpnKeepAlive = settings.vpnKeepAlive;
           DB._cloudUpdatedAt = cloudSettingsTs;
           // v107修复：云端设置落地后重置指纹与脏标记，避免把刚下载的设置当作用户修改回传覆盖
           _lastSettingsFp = settingsFingerprint(); _settingsDirty = false;
@@ -5168,7 +5178,7 @@ function initAIChat() {
     });
 
     // 版本号展示（供应用商店截图与自查）
-    var v = $("app-ver-label"); if (v) v.textContent = "版本 " + (window.APP_VERSION || "1.0.1");
+    var v = $("app-ver-label"); if (v) v.textContent = "版本 " + (window.APP_VERSION || "1.1.5");
   }
 
   function boot() {
