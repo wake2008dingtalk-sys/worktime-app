@@ -1552,11 +1552,11 @@ jobs:
             print("WARNING: MainActivity.java not found")
           PYEOF
 
-      - name: Set app version and SDK levels (v1.1.5 上架版)
+      - name: Set app version and SDK levels (v1.1.7 上架版)
         run: |
           # 应用商店要求：targetSdkVersion >= 34，版本号随每次上架递增。
           VERSION_CODE="${{ vars.RELEASE_VERSION_CODE || github.run_number }}"
-          VERSION_NAME="${{ vars.RELEASE_VERSION_NAME || '1.1.5' }}"
+          VERSION_NAME="${{ vars.RELEASE_VERSION_NAME || '1.1.7' }}"
           GRADLE="android/app/build.gradle"
           if [ -f "$GRADLE" ]; then
             if grep -q "versionCode" "$GRADLE"; then
@@ -1721,11 +1721,16 @@ jobs:
           echo "$KEYSTORE_BASE64" | base64 -d > /tmp/release.keystore
           UNSIGNED=$(ls android/app/build/outputs/apk/release/*-unsigned.apk | head -1)
           $ANDROID_HOME/build-tools/34.0.0/zipalign -p 4 "$UNSIGNED" /tmp/aligned.apk
+          # 显式启用 v1+v2+v3 三种签名方案：
+          # v1（APK JAR 签名）兼容老安装器/部分国产 ROM；v2/v3 供 Android 7+ 校验。
+          # minSdk 24 时 apksigner 默认可能不生成 v1 签名，个别安装器会报「该安装包未包含任何证书」。
           $ANDROID_HOME/build-tools/34.0.0/apksigner sign \
             --ks /tmp/release.keystore --ks-key-alias "$KEY_ALIAS" \
-            --ks-pass pass:"$KEYSTORE_PASSWORD" \
+            --ks-pass pass:"$KEYSTORE_PASSWORD" --key-pass pass:"$KEY_PASSWORD" \
+            --v1-signing-enabled true --v2-signing-enabled true --v3-signing-enabled true \
             --out android/app/build/outputs/apk/release/worktime-release.apk /tmp/aligned.apk
-          $ANDROID_HOME/build-tools/34.0.0/apksigner verify --print-certs android/app/build/outputs/apk/release/worktime-release.apk | head -5
+          $ANDROID_HOME/build-tools/34.0.0/apksigner verify --verbose --print-certs android/app/build/outputs/apk/release/worktime-release.apk | head -20
+          $ANDROID_HOME/build-tools/34.0.0/apksigner verify --verbose android/app/build/outputs/apk/release/worktime-release.apk | grep -E "Verified using (v1|v2|v3)"
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
@@ -1737,6 +1742,7 @@ jobs:
           mkdir -p release
           cp android/app/build/outputs/apk/debug/*.apk release/worktime-tracker.apk
           cp android/app/build/outputs/apk/release/worktime-release.apk release/worktime-release.apk
+          sha256sum release/worktime-release.apk | tee release/worktime-release.apk.sha256
           ls -la release/
 
       - name: Upload APK as artifact
@@ -1762,8 +1768,10 @@ jobs:
           body: |
             🎯 工时定位签到系统 - 自动构建版本
             
-            📱 **下载 APK**
-            下方 Assets 中点击 `worktime-tracker.apk` 即可下载安装
+            📱 **下载 APK（推荐签名版）**
+            下方 Assets 中点击 `worktime-release.apk` 下载安装（v1+v2+v3 签名）；
+            `worktime-tracker.apk` 为调试签名版，仅用于排查安装问题。
+            `worktime-release.apk.sha256` 可用于校验下载文件完整性（避免下载中断导致安装失败）。
             
             ⚠️ **安装前请确保：**
             - 开启「允许安装未知来源应用」
@@ -1777,6 +1785,7 @@ jobs:
           files: |
             release/worktime-tracker.apk
             release/worktime-release.apk
+            release/worktime-release.apk.sha256
           generate_release_notes: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
