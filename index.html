@@ -8,7 +8,7 @@
 <meta name="theme-color" content="#0b1220">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<link rel="apple-touch-icon" href="app-icon/icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
 <!-- v110: CloudBase Web SDK（APK 端匿名登录调云函数） -->
 <script src="cloudbase-sdk.min.js"></script>
 <style>
@@ -108,6 +108,26 @@ main{padding:14px;max-width:720px;margin:0 auto;padding-bottom:80px}
 
 /* status */
 .status-bar{display:flex;align-items:center;gap:10px;margin-bottom:12px;font-size:13px;color:var(--dim)}
+.anomaly-box{margin:0 0 12px;padding:8px 10px;border-radius:10px;background:rgba(251,191,36,.10);border:1px solid rgba(251,191,36,.35)}
+.anomaly-item{font-size:12px;color:var(--warn);line-height:1.6}
+/* v3：流水底账 / 周几规则 / 月历 */
+.ledger-item{padding:8px 0;border-bottom:1px solid var(--line);line-height:1.55}
+.ledger-item.deleted{opacity:.5;text-decoration:line-through}
+.ledger-item a{text-decoration:underline;cursor:pointer}
+.wd-row{display:flex;align-items:center;gap:6px;padding:4px 0;border-bottom:1px dashed var(--line)}
+.wd-row input[type=time]{width:92px;padding:4px 6px;border-radius:8px;border:1px solid var(--line2);background:var(--panel2);color:var(--txt)}
+.wd-row input[type=tel]{padding:4px 6px;border-radius:8px;border:1px solid var(--line2);background:var(--panel2);color:var(--txt)}
+.cal-month{margin-bottom:14px}
+.cal-title{font-size:12px;color:var(--dim);margin-bottom:6px}
+.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
+.cal-wd{font-size:10px;color:var(--faint);text-align:center;padding:2px 0}
+.cal-cell{font-size:11px;text-align:center;padding:6px 0;border-radius:6px;background:var(--panel2);border:1px solid var(--line);color:var(--dim)}
+.cal-cell.empty{background:transparent;border-color:transparent}
+.cal-cell.worked{background:rgba(52,211,153,.18);border-color:rgba(52,211,153,.45);color:var(--ok)}
+.cal-cell.missing{background:rgba(248,113,113,.18);border-color:rgba(248,113,113,.5);color:var(--bad)}
+.cal-cell.off{color:var(--faint);border-style:dashed}
+.cal-cell.today{outline:1px solid var(--acc);color:var(--acc)}
+.cal-cell.future{opacity:.45}
 .status-chip{display:inline-flex;align-items:center;gap:6px}
 .status-chip i{width:8px;height:8px;border-radius:50%;background:var(--faint)}
 .status-chip.on i{background:var(--ok);box-shadow:0 0 8px var(--ok)}
@@ -443,6 +463,7 @@ main{padding:14px;max-width:720px;margin:0 auto;padding-bottom:80px}
         <div class="sub" id="ov-target">目标 8h</div>
   </div>
 </div>
+    <div class="anomaly-box" id="anomaly-box" style="display:none"></div>
 
 <!-- 按天设置每日上班时间弹窗 -->
 <div class="dlg-mask" id="dlg-start-daily">
@@ -488,11 +509,12 @@ main{padding:14px;max-width:720px;margin:0 auto;padding-bottom:80px}
   <!-- 打卡记录 -->
   <div class="card">
     <h3><span class="dot"></span>今日打卡记录
+      <button class="fbtn" id="btn-ledger" style="float:right;padding:4px 10px;font-size:11px;margin-left:6px">📒 流水</button>
       <button class="fbtn" id="add-record-btn" style="float:right;padding:4px 10px;font-size:11px;background:rgba(52,211,153,0.15);color:var(--ok)">+ 补录打卡</button>
     </h3>
     <div class="tbl-wrap">
       <table class="tbl" id="rec-table">
-        <thead><tr><th>班次</th><th>上班时间</th><th>下班时间</th><th>工时</th><th>收入</th><th>状态</th><th>操作</th></tr></thead>
+        <thead><tr><th>来源</th><th>上班时间</th><th>下班时间</th><th>工时</th><th>收入</th><th>状态</th><th>操作</th></tr></thead>
         <tbody id="rec-list"></tbody>
       </table>
       <div class="empty" id="rec-empty" style="display:none">今日暂无打卡记录</div>
@@ -507,6 +529,9 @@ main{padding:14px;max-width:720px;margin:0 auto;padding-bottom:80px}
       <button data-period="30">本月</button>
       <button data-period="60">近60天</button>
       <button data-period="all">全部</button>
+    </div>
+    <div id="trend-wrap" style="margin-bottom:10px">
+      <canvas id="trend-canvas" height="90" style="width:100%;height:90px;display:block"></canvas>
     </div>
     <div class="tbl-wrap" id="stats-container">
       <div id="stats-body"></div>
@@ -563,6 +588,24 @@ main{padding:14px;max-width:720px;margin:0 auto;padding-bottom:80px}
       <button class="fbtn" id="edit-break-daily">按天分别设置</button>
     </div>
     <div class="set-row">
+      <label>计费模式</label>
+      <div style="display:flex;gap:8px;align-items:center">
+        <button class="fbtn" id="bill-shift" style="font-size:12px;padding:4px 10px">按班次</button>
+        <button class="fbtn" id="bill-actual" style="font-size:12px;padding:4px 10px">按实际时长</button>
+        <span id="bill-desc" style="color:var(--faint);font-size:12px">按班次：工时 = 设置班次 − 午休</span>
+      </div>
+    </div>
+    <div class="set-row">
+      <label>周期班次</label>
+      <button class="fbtn" id="edit-weekday" style="font-size:12px;padding:4px 10px">按周几设置</button>
+      <span id="weekday-desc" style="color:var(--faint);font-size:12px">周一~周日可设不同班次/休息日</span>
+    </div>
+    <div class="set-row">
+      <label>班次编辑</label>
+      <button class="fbtn" id="open-shift-editor" style="font-size:12px;padding:4px 10px">编辑某天班次</button>
+      <span style="color:var(--faint);font-size:12px">任意日期，一次改完上/下班/午休/模式/休息日</span>
+    </div>
+    <div class="set-row">
       <label>围栏半径</label>
       <input id="set-fence" type="tel" value="200" style="width:70px">
       <span style="color:var(--faint);font-size:12px">米（50-2000，进入范围自动签到）</span>
@@ -577,6 +620,7 @@ main{padding:14px;max-width:720px;margin:0 auto;padding-bottom:80px}
         <button class="fbtn" id="mode-standard" style="font-size:12px;padding:4px 10px">标准</button>
         <button class="fbtn" id="mode-low" style="font-size:12px;padding:4px 10px">低功耗</button>
         <span id="mode-desc" style="color:var(--faint);font-size:12px">标准模式：灵敏围栏，30秒轮询</span>
+        <button class="fbtn" id="demo-sim" style="font-size:11px;padding:3px 8px;margin-left:6px;color:var(--warn)">演示模式</button>
       </div>
     </div>
     <div class="set-row">
@@ -626,8 +670,14 @@ main{padding:14px;max-width:720px;margin:0 auto;padding-bottom:80px}
     <div class="set-row" style="margin-top:4px">
       <button class="fbtn primary" id="save-place">保存地点</button>
       <button class="fbtn" id="place-here">设为当前位置</button>
-      <button class="fbtn" id="export-data">📤 导出数据</button>
-      <button class="fbtn" id="reset-data">重置演示</button>
+    </div>
+    <div class="set-row" style="margin-top:4px;flex-wrap:wrap;gap:8px">
+      <label>数据</label>
+      <button class="fbtn" id="export-data">📤 导出备份</button>
+      <button class="fbtn" id="import-data">📥 导入备份</button>
+      <button class="fbtn" id="export-csv">📊 导出 CSV</button>
+      <button class="fbtn" id="reset-data" style="color:var(--bad)">🗑 清空数据</button>
+      <input type="file" id="import-file" accept=".json,application/json" style="display:none">
     </div>
     <div class="hint">
       工作地点请通过上方输入框设置。地图上拖拽红色标记可微调位置。每日工时支持「统一按月」或「按天分别设置」。数据自动保存在本地，也可导出备份。
@@ -823,6 +873,82 @@ main{padding:14px;max-width:720px;margin:0 auto;padding-bottom:80px}
   </div>
 </div>
 
+<!-- 统一班次编辑器（T5.2/T5.4：任意日期，一次改完） -->
+<div class="dlg-mask" id="dlg-shift-editor">
+  <div class="dlg">
+    <h3>班次编辑器</h3>
+    <div class="hint" id="shift-src-hint">选择日期后一次修改：上下班 / 午休 / 计费模式 / 休息日</div>
+    <div class="set-row" style="margin-top:10px"><label>日期</label><input id="se-date" type="date" style="flex:1"></div>
+    <div class="set-row"><label>上班</label><input id="se-start" type="time" value="09:00"></div>
+    <div class="set-row"><label>下班</label><input id="se-end" type="time" value="18:00"></div>
+    <div class="set-row"><label>午休</label><input id="se-break" type="tel" value="30" style="width:70px"><span style="color:var(--faint);font-size:12px">分钟</span></div>
+    <div class="set-row"><label>计费</label>
+      <select id="se-mode" style="flex:1"><option value="shift">按班次</option><option value="actual">按实际时长</option></select>
+    </div>
+    <div class="set-row"><label>休息日</label>
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px"><input type="checkbox" id="se-off" style="width:16px;height:16px"> 当天休息（不计目标，仍保留自动签到）</label>
+    </div>
+    <div class="dlg-actions">
+      <button class="fbtn" id="se-cancel">取消</button>
+      <button class="fbtn primary" id="se-save">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 周期班次（按周几） -->
+<div class="dlg-mask" id="dlg-weekday">
+  <div class="dlg">
+    <h3>周期班次（按周几）</h3>
+    <div class="hint">勾选「启用」后该周几使用右侧班次；休息日不计目标但保留自动签到。保存时自动冻结历史。</div>
+    <div id="weekday-list" style="max-height:46vh;overflow:auto;margin-top:8px"></div>
+    <div class="dlg-actions">
+      <button class="fbtn" id="wd-cancel">取消</button>
+      <button class="fbtn primary" id="wd-save">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 打卡流水底账（证据层） -->
+<div class="dlg-mask" id="dlg-ledger">
+  <div class="dlg" style="max-height:88vh">
+    <h3>打卡流水（证据层）</h3>
+    <div class="set-row" style="margin:8px 0">
+      <label>月份</label>
+      <input id="ledger-month" type="month" style="flex:1">
+      <button class="fbtn" id="ledger-refresh">刷新</button>
+    </div>
+    <div class="hint" style="margin-bottom:8px">逐条真实记录：真实时刻 · 来源 · 精度 · 距工作点 · 坐标。软删除记录置灰可恢复。</div>
+    <div id="ledger-list" style="max-height:50vh;overflow:auto;font-size:12px"></div>
+    <div class="dlg-actions"><button class="fbtn primary" id="ledger-close">关闭</button></div>
+  </div>
+</div>
+
+<!-- 导入预览 -->
+<div class="dlg-mask" id="dlg-import">
+  <div class="dlg">
+    <h3>导入备份</h3>
+    <div class="hint" id="import-summary">—</div>
+    <div id="import-list" style="max-height:38vh;overflow:auto;font-size:12px;margin:8px 0"></div>
+    <div class="dlg-actions">
+      <button class="fbtn" id="import-cancel">取消</button>
+      <button class="fbtn primary" id="import-confirm">合并导入</button>
+    </div>
+  </div>
+</div>
+
+<!-- 通用自绘确认弹层（替代系统 confirm/prompt） -->
+<div class="dlg-mask" id="dlg-confirm">
+  <div class="dlg">
+    <h3 id="confirm-title">确认</h3>
+    <div class="hint" id="confirm-text">—</div>
+    <input id="confirm-input" type="text" style="display:none;width:100%;margin-top:10px;padding:10px;border-radius:10px;border:1px solid var(--line2);background:var(--panel2);color:var(--txt)">
+    <div class="dlg-actions">
+      <button class="fbtn" id="confirm-cancel">取消</button>
+      <button class="fbtn primary" id="confirm-ok">确定</button>
+    </div>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script>
@@ -883,56 +1009,128 @@ function fmtClock(ts) {
   const d = new Date(ts);
   return `${fmtTime(ts)}:${String(d.getSeconds()).padStart(2, "0")}`;
 }
-function getTodayWorkTimes() {
-  const now = new Date();
-  const todayKey = dateKey(now);
-  const startStr = (DB.dailyStartTimeMap && DB.dailyStartTimeMap[todayKey] !== undefined)
-    ? DB.dailyStartTimeMap[todayKey] : (DB.dailyStartTime || "09:00");
-  const [sh, sm] = startStr.split(":").map(Number);
-  const startMs = dayStartTs(now) + sh * 3600000 + sm * 60000;
-  
-  // 优先使用下班时间计算工时
-  let endMs, endStr, hours;
-  const endTimeStr = (DB.dailyEndTimeMap && DB.dailyEndTimeMap[todayKey] !== undefined)
-    ? DB.dailyEndTimeMap[todayKey] : (DB.dailyEndTime || null);
-  
-  if (endTimeStr) {
-    const [eh, em] = endTimeStr.split(":").map(Number);
-    endMs = dayStartTs(now) + eh * 3600000 + em * 60000;
-    if (endMs < startMs) endMs += 86400000; // 跨夜班处理
-    hours = (endMs - startMs) / 3600000;
-    endStr = endTimeStr;
+/* ===================== 账面配置层 v3（dayConfigMap / 周几规则）===================== */
+// 设计依据：记录层只存"真实证据"（time/lat/lng/dist/source），账面时刻一律由配置推导，
+// 历史日通过 dayConfigMap 快照冻结（frozen），从此改默认值/调薪不会让历史账目漂移。
+function parseHM(s) {
+  if (s === null || s === undefined || s === "") return null;
+  const m = String(s).trim().match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) return null;
+  const h = parseInt(m[1], 10), mi = parseInt(m[2], 10);
+  if (h < 0 || h > 23 || mi < 0 || mi > 59) return null;
+  return h * 60 + mi;
+}
+function _cfgPick(obj, key, def) {
+  if (obj && obj[key] !== undefined && obj[key] !== null && obj[key] !== "") return obj[key];
+  return def;
+}
+// 实时解析某天的账面配置（不读写 dayConfigMap，仅按当前设置/周几规则推导）
+function _liveConfigFor(db, dk) {
+  db = db || DB;
+  dk = dk || dateKey(new Date());
+  const wd = parseDateKey(dk).getDay(); // 0=周日 … 6=周六
+  const rule = (db.weekdayRules && db.weekdayRules[wd]) || null;
+  const mapStart = db.dailyStartTimeMap || {};
+  const mapEnd = db.dailyEndTimeMap || {};
+  const mapBreak = db.dailyBreakMap || {};
+  const baseBreak = parseInt(db.dailyBreakMinutes);
+  return {
+    start: _cfgPick(mapStart, dk, (rule && rule.start != null) ? rule.start : (db.dailyStartTime || "09:00")),
+    end:   _cfgPick(mapEnd, dk, (rule && rule.end != null) ? rule.end : (db.dailyEndTime || null)),
+    breakMin: Math.max(0, parseInt(_cfgPick(mapBreak, dk,
+        (rule && rule.breakMin != null) ? rule.breakMin : (isNaN(baseBreak) ? 30 : baseBreak))) || 0),
+    rate: (rule && rule.rate != null) ? rule.rate : (db.payRate || 0),
+    mode: (rule && rule.mode) || db.billMode || "shift", // shift=按班次(默认) / actual=按实际时长
+    off: !!(rule && rule.off)
+  };
+}
+function liveConfig(dk) { return _liveConfigFor(DB, dk || dateKey(new Date())); }
+// 读取链：dayConfigMap 快照/按日覆盖 > 今天与未来实时配置 > 历史兜底实时配置
+function dayConfigOf(dk) {
+  dk = dk || dateKey(new Date());
+  if (DB.dayConfigMap && DB.dayConfigMap[dk]) return DB.dayConfigMap[dk];
+  if (dk >= dateKey(new Date())) return liveConfig(dk);
+  return liveConfig(dk);
+}
+// 由配置 + 日期推导绝对毫秒（含跨夜班处理）；end 缺失时回退 dailyHours
+function cfgTimesFor(dk, cfg) {
+  cfg = cfg || liveConfig(dk);
+  const base = parseDateKey(dk).getTime();
+  const startMin = parseHM(cfg.start);
+  const startMs = base + (startMin == null ? 540 : startMin) * 60000;
+  let endMs, setMin, endStr;
+  const endMin = parseHM(cfg.end);
+  if (endMin != null) {
+    endMs = base + endMin * 60000;
+    if (endMs < startMs) endMs += 86400000; // 跨夜班
+    setMin = (endMs - startMs) / 60000;
+    endStr = cfg.end;
   } else {
-    // 回退到 dailyHours 推算
-    hours = (DB.dailyHoursMap && DB.dailyHoursMap[todayKey] !== undefined)
-      ? DB.dailyHoursMap[todayKey] : (DB.dailyHours || 8);
-    endMs = startMs + hours * 3600000;
+    setMin = (parseFloat(DB.dailyHours) || 8) * 60;
+    endMs = startMs + setMin * 60000;
     endStr = fmtTime(endMs);
   }
-  return { startMs, endMs, startStr, endStr, hours };
+  return { startMs, endMs, setMin, startStr: cfg.start || fmtTime(startMs), endStr };
 }
-
-// v45: 设置时间修改后，自动校准当天所有签到记录的时间
-function calibrateRecords() {
-  const today = new Date();
-  const todayKey = dateKey(today);
-  const { startMs } = getTodayWorkTimes();
-  let changed = false;
-  DB.records.forEach(r => {
-    if (r.type === "in") {
-      const rDate = dateKey(new Date(r.time));
-      if (rDate === todayKey && r.time !== startMs) {
-        r.time = startMs;
-        changed = true;
-      }
-    }
+// 一次性迁移：把"有记录的历史日"固化为快照（只固化旧口径，不改写任何记录）
+function migrateToV3(db) {
+  db = db || DB;
+  if (!db || typeof db !== "object") return db;
+  db.dayConfigMap = db.dayConfigMap || {};
+  db.weekdayRules = db.weekdayRules || {};
+  const today = dateKey(new Date());
+  const days = [...new Set((db.records || []).filter(r => !r.deleted && r.dateKey).map(r => r.dateKey))];
+  days.forEach(dk => {
+    if (db.dayConfigMap[dk] || dk >= today) return; // 今天与未来走实时配置
+    const c = _liveConfigFor(db, dk);
+    db.dayConfigMap[dk] = {
+      start: c.start, end: c.end, breakMin: c.breakMin, rate: c.rate, mode: c.mode,
+      off: c.off, frozen: true, _legacy: true
+    };
   });
-  if (changed) {
-    saveDB();
-    renderAll();
-    toast("签到时间已根据新设置自动校准", "ok");
-  }
+  return db;
 }
+// 改默认值/调薪/改周几规则前：先把"今天之前的记录日"按当前生效值冻结，再应用新值
+function freezeHistory() {
+  const today = dateKey(new Date());
+  const days = [...new Set((DB.records || []).filter(r => !r.deleted && r.dateKey).map(r => r.dateKey))];
+  days.forEach(dk => {
+    if (dk >= today || DB.dayConfigMap[dk]) return;
+    const c = liveConfig(dk);
+    DB.dayConfigMap[dk] = {
+      start: c.start, end: c.end, breakMin: c.breakMin, rate: c.rate, mode: c.mode,
+      off: c.off, frozen: true
+    };
+  });
+}
+// 设置默认值的唯一入口（保存时薪/上下班/午休必须走这里，否则历史账目会漂移）
+function changeDefaults(patch) {
+  freezeHistory(); // 此时 patch 尚未应用，固化的是旧值
+  Object.assign(DB, patch || {});
+  if (!saveDB()) return false;
+  syncNativeSettings();
+  renderAll();
+  return true;
+}
+// 周几规则保存入口
+function changeWeekdayRules(rules) {
+  freezeHistory();
+  DB.weekdayRules = rules || {};
+  if (!saveDB()) return false;
+  syncNativeSettings();
+  renderAll();
+  return true;
+}
+function getTodayWorkTimes() {
+  const todayKey = dateKey(new Date());
+  const cfg = dayConfigOf(todayKey);
+  const t = cfgTimesFor(todayKey, cfg);
+  return {
+    startMs: t.startMs, endMs: t.endMs, startStr: t.startStr, endStr: t.endStr,
+    hours: (t.endMs - t.startMs) / 3600000, cfg: cfg
+  };
+}
+let _notifySeq = 3000; // T7.11#4：通知 ID 自增，避免同秒通知互相覆盖
 function notify(title, body) {
   // 优先使用 Capacitor 本地通知（在原生 APK 中弹出系统通知栏，类似微信通知）
   if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.LocalNotifications) {
@@ -941,7 +1139,7 @@ function notify(title, body) {
         notifications: [{
           title: title,
           body: body,
-          id: Math.floor(Date.now() / 1000) % 2147483647,
+          id: (_notifySeq = (_notifySeq % 2147483000) + 1),
           schedule: { at: new Date(Date.now() + 300) },
           smallIcon: "ic_launcher",
           largeIcon: "ic_launcher",
@@ -979,26 +1177,14 @@ function fmtDurLong(min) {
   const h = Math.floor(min / 60), m = min % 60;
   return m ? h + "小时" + m + "分钟" : h + "小时";
 }
-// v107修复：按日期取上下班时间（历史日期不再误用"今天"的班次设置计算工时）
+// v3：按日期取账面配置（历史日优先 dayConfigMap 快照，今天/未来走实时配置）
 function getWorkTimesForDate(dayKey) {
-  const base = parseDateKey(dayKey);
-  const startStr = (DB.dailyStartTimeMap && DB.dailyStartTimeMap[dayKey] !== undefined)
-    ? DB.dailyStartTimeMap[dayKey] : (DB.dailyStartTime || "09:00");
-  const endTimeStr = (DB.dailyEndTimeMap && DB.dailyEndTimeMap[dayKey] !== undefined)
-    ? DB.dailyEndTimeMap[dayKey] : (DB.dailyEndTime || null);
-  const [sh, sm] = startStr.split(":").map(Number);
-  const startMs = base.getTime() + sh * 3600000 + sm * 60000;
-  let endMs, hours;
-  if (endTimeStr) {
-    const [eh, em] = endTimeStr.split(":").map(Number);
-    endMs = base.getTime() + eh * 3600000 + em * 60000;
-    if (endMs < startMs) endMs += 86400000;
-    hours = (endMs - startMs) / 3600000;
-  } else {
-    hours = (DB.dailyHoursMap && DB.dailyHoursMap[dayKey] !== undefined) ? DB.dailyHoursMap[dayKey] : (DB.dailyHours || 8);
-    endMs = startMs + hours * 3600000;
-  }
-  return { startMs, endMs, hours };
+  const cfg = dayConfigOf(dayKey);
+  const t = cfgTimesFor(dayKey, cfg);
+  return {
+    startMs: t.startMs, endMs: t.endMs, hours: (t.endMs - t.startMs) / 3600000,
+    startStr: t.startStr, endStr: t.endStr, cfg: cfg
+  };
 }
 // v107修复：存量记录迁移——补 id / dateKey / updatedAt（旧记录缺 dateKey 曾导致删除与云同步合并键永不命中）
 function migrateRecords(recs) {
@@ -1030,11 +1216,17 @@ function normalizeDB(d) {
   if (d.powerMode === undefined) d.powerMode = "standard";
   if (d.pollInterval === undefined) d.pollInterval = 30;
   if (d.payRate === undefined) d.payRate = 25;
-  if (d.vpnKeepAlive === undefined) d.vpnKeepAlive = "auto";
+  if (d.vpnKeepAlive === undefined) d.vpnKeepAlive = "manual"; // T6.3：VPN 保活默认关闭，用户设置里可改回自动
+  // v3 账面配置层默认值（旧数据自动升级）
+  if (!d.dayConfigMap || typeof d.dayConfigMap !== "object") d.dayConfigMap = {};
+  if (!d.weekdayRules || typeof d.weekdayRules !== "object") d.weekdayRules = {};
+  if (d.billMode === undefined) d.billMode = "shift";
   if (d.fence && !d.workPlace) { d.workPlace = { lat: d.fence.lat, lng:
       d.fence.lng }; delete d.fence; delete d.strict; }
   if (!d.workPlace) d.workPlace = { lat: 31.2988, lng: 120.5853, name: "苏州市" };
   if (d.workPlace && !d.workPlace.name) d.workPlace.name = "苏州市";
+  // v3：升级时给"有记录的历史日"固化账面快照（不改写任何记录）
+  migrateToV3(d);
   return d;
 }
 // v107修复：有效记录视图（过滤软删除墓碑）
@@ -1050,52 +1242,29 @@ function dayEndTs(d) {
   return dayStartTs(d) + 86400000;
 }
 function getDailyTargetMinutes(db, dayKey) {
-  // 先根据该日期的上下班设置时间计算基准目标工时
-  const startStr = (db.dailyStartTimeMap && db.dailyStartTimeMap[dayKey] !== undefined)
-    ? db.dailyStartTimeMap[dayKey] : (db.dailyStartTime || "09:00");
-  const [sh, sm] = startStr.split(":").map(Number);
-  const endTimeStr = (db.dailyEndTimeMap && db.dailyEndTimeMap[dayKey] !== undefined)
-    ? db.dailyEndTimeMap[dayKey] : (db.dailyEndTime || null);
-  let baseHours = 0;
-  if (endTimeStr) {
-    const [eh, em] = endTimeStr.split(":").map(Number);
-    baseHours = (eh * 60 + em - sh * 60 - sm) / 60;
-    if (baseHours < 0) baseHours += 24;
-  }
-  // 优先使用 dailyHoursMap，但需校验是否为污染数据
-  if (db.dailyHoursMap && db.dailyHoursMap[dayKey] !== undefined) {
-    const hours = db.dailyHoursMap[dayKey] || 0;
-    // 有效范围 0~24 且与上下班时间基准差异不超过 50%（防止旧版本污染数据）
-    const isValid = hours > 0 && hours <= 24;
-    const isNotPolluted = baseHours <= 0 || (hours >= baseHours * 0.5 && hours <= baseHours * 2);
-    if (isValid && isNotPolluted) {
-      return hours * 60;
-    }
-    // 污染数据（如 4.8167）忽略，继续回退计算
-  }
-  // 回退：使用上下班时间计算的基准工时
-  if (baseHours > 0) {
-    return baseHours * 60;
-  }
-  // 最终回退：全局 dailyHours
-  return (db.dailyHours || 8) * 60;
+  // v3：目标工时 = 账面班次时长 − 午休（与 computeShifts 封顶同源，进度可到 100%）；休息日为 0
+  const cfg = (db && db === DB) ? dayConfigOf(dayKey) : _liveConfigFor(db || DB, dayKey);
+  if (cfg.off) return 0;
+  const t = cfgTimesFor(dayKey, cfg);
+  return Math.max(0, Math.round(t.setMin - Math.max(0, parseInt(cfg.breakMin) || 0)));
 }
-function computeShifts(records, dayStart, dayEnd, breakMinutes) {
+function computeShifts(records, dayStart, dayEnd, breakMinutes, cfgOverride) {
   const dayKey = dateKey(new Date(dayStart + 86400000 / 2));
+  const cfg = cfgOverride || dayConfigOf(dayKey);
+  const t = cfgTimesFor(dayKey, cfg);
+  const setStartMs = t.startMs, setEndMs = t.endMs, setMin = t.setMin;
+  const breakMin = (breakMinutes !== undefined && breakMinutes !== null)
+    ? Math.max(0, parseInt(breakMinutes) || 0) : Math.max(0, parseInt(cfg.breakMin) || 0);
+  const targetMin = Math.max(0, Math.round(setMin - breakMin));
+  // T5.3：休息日默认按"实际在场"计（跳过未配对补全），工时=实际在场−午休
+  const effMode = cfg.off ? "actual" : cfg.mode;
   // v107修复：过滤软删除记录；下班记录按序消费，避免多个上班配对同一个下班（双计工时）
-  // v111fix10：下班记录窗口扩至次日6小时——跨午夜班次（如22:00下班设06:00）的下班打卡落在次日，
-  // 此前按0点硬切导致夜班下半段丢失
+  // v111fix10：下班记录窗口扩至次日6小时——跨午夜班次的下班打卡落在次日
   const inRs = records.filter(r => !r.deleted && r.time >= dayStart && r.time < dayEnd && r.type === "in").sort((a,
       b) => a.time - b.time);
   const outRs = records.filter(r => !r.deleted && r.time >= dayStart && r.time < dayEnd + 6 * 3600000 && r.type === "out").sort((a,
       b) => a.time - b.time);
   const shifts = [];
-  // v111fix6（方案A）：设置班次时间提前取，配对班次的工时也一律按设置时间计算
-  const { startMs: setStartMs, endMs: setEndMs } = getWorkTimesForDate(dateKey(new Date(dayStart + 86400000 / 2)));
-  const setMin = Math.max(0, (setEndMs - setStartMs) / 60000);
-  // v111fix10：封顶值与统计页目标工时同源（getDailyTargetMinutes），
-  // 此前直接用 setMin-breakMinutes，在 dailyEndTime 缺失（按 dailyHours 推算）等场景与显示/目标口径不一致
-  const capMin = Math.min(setMin, getDailyTargetMinutes(DB, dateKey(new Date(dayStart + 86400000 / 2))));
   let outIdx = 0;
   inRs.forEach(rIn => {
     while (outIdx < outRs.length && outRs[outIdx].time <= rIn.time) outIdx++;
@@ -1103,34 +1272,39 @@ function computeShifts(records, dayStart, dayEnd, breakMinutes) {
     if (out) {
       outIdx++; // 消费该下班记录：同一天第二个上班不会再配到它
       const rawMin = Math.max(0, (out.time - rIn.time) / 60000);
-      const breakMin = breakMinutes || 0;
-      // 方案A：工时一律按设置时间（设置下班-设置上班-午休），早到/晚退均不增减
-      const minutes = Math.max(0, setMin - breakMin);
+      // shift=方案A（按设置班次，早到/晚退不增减）；actual=按实际时长（加班如实体现）
+      const minutes = effMode === "actual"
+        ? Math.max(0, rawMin - breakMin)
+        : Math.max(0, setMin - breakMin);
       shifts.push({ in: rIn.time, out: out.time, minutes, rawMinutes: rawMin, breakMinutes: breakMin, distIn:
           rIn.dist || null, distOut: out.dist || null });
     }
   });
-  // 未配对的上班记录：用该日期的设置下班时间补全，且工时必须按设置上班时间计算
-  // v107修复：改用 getWorkTimesForDate(dayKey)——此前历史日期误用"今天"的班次设置
+  // 未配对的上班记录：shift 模式用设置下班时间补全；actual 模式算到 min(现在, 设置下班)
   const pairedIn = new Set(shifts.map(s => s.in));
+  const nowMs = Date.now();
   inRs.forEach(rIn => {
     if (!pairedIn.has(rIn.time)) {
-      const endOfDay = Math.min(setEndMs, dayEnd);
-      // 关键修复：工时按设置上班时间计算，而非实际打卡时间
-      const calcStart = Math.min(setStartMs, endOfDay);
-      const rawMin = Math.max(0, (endOfDay - calcStart) / 60000);
-      const breakMin = breakMinutes || 0;
-      const minutes = Math.max(0, rawMin - breakMin);
-      shifts.push({ in: rIn.time, out: endOfDay, minutes, rawMinutes: rawMin, breakMinutes: breakMin, distIn:
+      const softEnd = effMode === "actual"
+        ? Math.min(setEndMs, dayEnd, Math.max(nowMs, rIn.time))
+        : Math.min(setEndMs, dayEnd);
+      let minutes, rawMin;
+      if (effMode === "actual") {
+        rawMin = Math.max(0, (softEnd - rIn.time) / 60000);
+        minutes = Math.max(0, rawMin - breakMin);
+      } else {
+        const calcStart = Math.min(setStartMs, softEnd);
+        rawMin = Math.max(0, (softEnd - calcStart) / 60000);
+        minutes = Math.max(0, setMin - breakMin);
+      }
+      shifts.push({ in: rIn.time, out: softEnd, minutes, rawMinutes: rawMin, breakMinutes: breakMin, distIn:
           rIn.dist || null, distOut: null });
     }
   });
-  // v111fix9：每日工时封顶——方案A下每个班次都按设置算满，
-  // 同一天多个班次（补录/重复打卡）会导致工时翻倍；
-  // 封顶规则：全天各班次工时合计 ≤ 设置工时（设置班次时长-午休）
   const sorted = shifts.sort((a, b) => a.in - b.in);
-  const dayCap = Math.max(0, capMin - (breakMinutes || 0));
-  let remaining = dayCap;
+  // 每日封顶：shift 模式合计 ≤ 目标工时（防补录/重复打卡翻倍）；
+  // actual 模式只做 24h 合理性封顶，让加班如实体现
+  let remaining = effMode === "actual" ? 24 * 60 : targetMin;
   sorted.forEach(s => {
     s.minutes = Math.min(s.minutes, Math.max(0, remaining));
     remaining -= s.minutes;
@@ -1138,10 +1312,8 @@ function computeShifts(records, dayStart, dayEnd, breakMinutes) {
   return sorted;
 }
 function getDailyBreakMinutes(db, dayKey) {
-  if (db.dailyBreakMap && db.dailyBreakMap[dayKey] !== undefined) {
-    return Math.max(0, parseInt(db.dailyBreakMap[dayKey]) || 0);
-  }
-  return Math.max(0, parseInt(db.dailyBreakMinutes) || 0);
+  const cfg = (db && db === DB) ? dayConfigOf(dayKey) : _liveConfigFor(db || DB, dayKey);
+  return Math.max(0, parseInt(cfg.breakMin) || 0);
 }
 function dayMinutes(records, dayStart, dayEnd) {
   const dayKey = dateKey(new Date(dayStart + 86400000 / 2));
@@ -1160,7 +1332,7 @@ function seedData() {
     payRate: 25,
     dailyHours: 8,
     dailyHoursMap: {},
-    vpnKeepAlive: "auto",
+    vpnKeepAlive: "manual",   // T6.3：VPN 保活默认关闭（设置页可改回自动）
     dailyStartTime: "09:00",
     dailyStartTimeMap: {},
     dailyEndTime: "18:00",
@@ -1170,6 +1342,10 @@ function seedData() {
     autoCheckIn: true,
     powerMode: "standard",   // "standard" | "low"
     pollInterval: 30,          // 轮询间隔（秒）
+    // v3 账面配置层
+    dayConfigMap: {},          // 历史日快照/按日显式覆盖
+    weekdayRules: {},          // 按周几的周期班次规则（0=周日…6=周六）
+    billMode: "shift",         // 计费模式：shift=按班次（默认） / actual=按实际时长
   };
 }
 
@@ -1363,7 +1539,9 @@ function settingsFingerprint() {
   return JSON.stringify([DB.workPlace, DB.payRate, DB.dailyHours, DB.dailyHoursMap, DB.dailyStartTime,
       DB.dailyStartTimeMap,
     DB.dailyEndTime, DB.dailyEndTimeMap, DB.dailyBreakMinutes, DB.dailyBreakMap, DB.autoCheckIn, DB.powerMode, DB.pollInterval,
-    DB.fenceRadius, DB.vpnKeepAlive]);
+    DB.fenceRadius, DB.vpnKeepAlive,
+    // v3：账面配置层参与指纹，保证 dayConfigMap/weekdayRules/billMode 变更会触发云同步与原生重同步
+    DB.billMode, DB.weekdayRules, DB.dayConfigMap]);
 }
 let DB = loadDB();
 _lastSettingsFp = settingsFingerprint();
@@ -1400,6 +1578,7 @@ function syncNativeSettings() {
   const dk = dateKey(new Date());
   const wt = getWorkTimesForDate(dk);
   const base = parseDateKey(dk).getTime();
+  const cfg = wt.cfg || liveConfig(dk);
   return P.syncSettings({
     workLat: DB.workPlace.lat,
     workLng: DB.workPlace.lng,
@@ -1407,7 +1586,8 @@ function syncNativeSettings() {
     startMinOfDay: Math.round((wt.startMs - base) / 60000),
     endMinOfDay: Math.round((wt.endMs - base) / 60000),
     autoCheckIn: DB.autoCheckIn !== false,
-    pollInterval: Math.max(DB.pollInterval || 300, 60) * 1000 // v108: 默认 5 分钟（原 30 秒 GPS 轮询耗电）
+    offDay: !!cfg.off, // v3：休息日让原生侧把签到时间门限视为全天开放
+    pollInterval: Math.max(DB.pollInterval || 30, 60) * 1000
   }).then(function() { Logger.debug("Settings synced to native"); })
     .catch(function(e) { Logger.error("syncNativeSettings:", e); });
 }
@@ -1421,7 +1601,9 @@ async function saveToSQLite() {
     const fields = ['workPlace','payRate','dailyHours','dailyHoursMap',
       'dailyStartTime','dailyStartTimeMap','dailyEndTime','dailyEndTimeMap',
       'dailyBreakMinutes','dailyBreakMap','autoCheckIn','powerMode',
-      'pollInterval','vpnKeepAlive','fenceRadius']; // v107修复：补 fenceRadius（此前不落库，恢复后围栏回退默认200米）
+      'pollInterval','vpnKeepAlive','fenceRadius',
+      // v3：账面配置层随设置持久化，云同步/原生往返不丢
+      'dayConfigMap','weekdayRules','billMode'];
     fields.forEach(function(f){ if (DB[f] !== undefined) settings[f] = DB[f]; });
     const res = await plugin.sqliteSave({
       settings: JSON.stringify(settings),
@@ -1548,31 +1730,30 @@ function loadDB() {
   try { localStorage.setItem(DB_KEY, JSON.stringify(seed)); } catch (e) {}
   return seed;
 }
-function addRecord(type, pos) {
-  // v45: 一天只签到一次，时间固定为设置的上班时间
-  const { startMs } = getTodayWorkTimes();
-  const recTime = startMs;
-  
-  // 如果当天已有上班记录，不再重复签到（v107修复：忽略软删除的记录）
-  const todayKey = dateKey(new Date());
-  const alreadySigned = DB.records.some(r => {
-    const rDate = dateKey(new Date(r.time));
-    return !r.deleted && r.type === "in" && rDate === todayKey;
-  });
-  if (alreadySigned) {
-    toast("今天已经签到过了", "warn");
+// v3：type 尊重参数（in/out）；time 写真实触发时刻；新增 dist 距工作点米数
+function addRecord(type, pos, source) {
+  const now = Date.now();
+  const todayKey = dateKey(new Date(now));
+  const recType = type === "out" ? "out" : "in";
+  // 防重复：同一天同类型只记一次（忽略软删除墓碑）
+  const already = DB.records.some(r => !r.deleted && r.type === recType &&
+      dateKey(new Date(r.time)) === todayKey);
+  if (already) {
+    toast(recType === "in" ? "今天已经签到过了" : "今天已经签退过了", "warn");
     return null;
   }
-
+  const distVal = (pos && isFinite(distToWork(pos))) ? Math.round(distToWork(pos)) : null;
   const rec = {
-    id: "r" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
-    type: "in", time: recTime,
-    dateKey: dateKey(new Date(recTime)), // v107修复：补 dateKey——此前缺失导致 deleteShift 找不到记录、云同步合并键永不命中
+    id: "r" + now.toString(36) + Math.random().toString(36).slice(2, 5),
+    type: recType,
+    time: now, // T3.3：真实触发时刻（旧记录保持原值，不做改写迁移）
+    dateKey: todayKey,
     lat: pos && pos.lat != null ? pos.lat : null,
     lng: pos && pos.lng != null ? pos.lng : null,
     acc: pos && pos.acc != null ? pos.acc : null,
-    source: "auto",
-    updatedAt: Date.now() // v107修复：增量同步游标（打卡 time 固定为上班时刻，不能作游标）
+    dist: distVal,
+    source: source || (locMode === "sim" ? "sim" : "auto"),
+    updatedAt: now
   };
   DB.records.push(rec);
   if (!saveDB()) {
@@ -1581,7 +1762,7 @@ function addRecord(type, pos) {
     toast("保存失败：数据无法写入存储。请尝试以下方法：1)重启APP 2)检查手机存储空间 3)使用导出功能备份", "bad", 5000);
     return null;
   }
-  // 触发云同步（v107修复：改用全局 CloudSync 接口——原 typeof 守卫引用闭包内函数恒为 undefined，同步从不触发）
+  // 触发云同步（v107修复：改用全局 CloudSync 接口）
   if (window.CloudSync && typeof window.CloudSync.onRecordChange === 'function') window.CloudSync.onRecordChange();
   return rec;
 }
@@ -1591,6 +1772,387 @@ function resetDB() {
     toast("保存失败：浏览器限制了本地存储，请尝试更换浏览器或使用导出数据功能备份", "bad");
   }
 }
+
+/* ===================== v3 功能实现（任务书第 4/5/7 批）===================== */
+const APP_VERSION = "1.1.0";
+const WEEKDAY_NAMES = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
+
+// ---- 通用自绘弹层：确认 / 输入（替代系统 confirm/prompt）----
+function customConfirm(title, text, okText) {
+  return new Promise(function(resolve) {
+    const mask = $("#dlg-confirm"), input = $("#confirm-input");
+    $("#confirm-title").textContent = title || "确认";
+    $("#confirm-text").textContent = text || "";
+    if (input) { input.style.display = "none"; input.value = ""; }
+    $("#confirm-ok").textContent = okText || "确定";
+    mask.classList.add("show");
+    function done(v) {
+      mask.classList.remove("show");
+      $("#confirm-ok").removeEventListener("click", onOk);
+      $("#confirm-cancel").removeEventListener("click", onCancel);
+      resolve(v);
+    }
+    function onOk() { done(true); }
+    function onCancel() { done(false); }
+    $("#confirm-ok").addEventListener("click", onOk);
+    $("#confirm-cancel").addEventListener("click", onCancel);
+  });
+}
+function customPrompt(title, text, defaultValue) {
+  return new Promise(function(resolve) {
+    const mask = $("#dlg-confirm"), input = $("#confirm-input");
+    $("#confirm-title").textContent = title || "输入";
+    $("#confirm-text").textContent = text || "";
+    if (input) { input.style.display = "block"; input.value = defaultValue || ""; }
+    $("#confirm-ok").textContent = "确定";
+    mask.classList.add("show");
+    if (input) { try { input.focus(); } catch (e) {} }
+    function done(v) {
+      mask.classList.remove("show");
+      $("#confirm-ok").removeEventListener("click", onOk);
+      $("#confirm-cancel").removeEventListener("click", onCancel);
+      resolve(v);
+    }
+    function onOk() { done(input ? input.value : ""); }
+    function onCancel() { done(null); }
+    $("#confirm-ok").addEventListener("click", onOk);
+    $("#confirm-cancel").addEventListener("click", onCancel);
+  });
+}
+
+// ---- 导出：JSON 备份 / CSV 工资表 ----
+function downloadText(filename, text, mime) {
+  try {
+    const blob = new Blob([text], { type: mime || "text/plain;charset=utf-8" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function() { try { URL.revokeObjectURL(a.href); a.remove(); } catch (e) {} }, 1500);
+    return true;
+  } catch (e) { Logger.error("downloadText:", e); return false; }
+}
+function exportJSON() {
+  const dk = dateKey(new Date());
+  const name = "worktime-backup-" + dk + ".json";
+  if (downloadText(name, JSON.stringify(DB, null, 2), "application/json;charset=utf-8")) {
+    toast("已导出备份：" + name, "ok");
+    return true;
+  }
+  toast("导出失败，请检查存储权限", "bad");
+  return false;
+}
+function csvCell(v) {
+  v = v == null ? "" : String(v);
+  return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+}
+function buildCSV() {
+  const rows = [["日期", "类型", "上班", "下班", "工时(小时)", "午休(分钟)", "时薪", "收入(元)", "来源", "备注"]];
+  const days = [...new Set((DB.records || []).filter(r => !r.deleted && r.dateKey).map(r => r.dateKey))].sort().reverse();
+  days.forEach(function(dk) {
+    const cfg = dayConfigOf(dk);
+    const breakMin = Math.max(0, parseInt(cfg.breakMin) || 0);
+    const rateVal = (cfg.rate != null ? cfg.rate : DB.payRate) || 0;
+    const shifts = computeShifts(DB.records, dayStartTs(parseDateKey(dk)), dayEndTs(parseDateKey(dk)), breakMin);
+    if (!shifts.length) {
+      rows.push([dk, "无记录", "", "", "", "", rateVal, "", "", ""]);
+      return;
+    }
+    shifts.forEach(function(s) {
+      const hours = s.minutes / 60;
+      rows.push([
+        dk,
+        s.out ? "完整班次" : "仅签到",
+        fmtTime(s.in),
+        s.out ? fmtTime(s.out) : "",
+        hours.toFixed(2),
+        breakMin,
+        rateVal,
+        (hours * rateVal).toFixed(2),
+        s.source || "auto",
+        s.out ? "" : "未签退"
+      ]);
+    });
+  });
+  // BOM 让 Excel 正确识别 UTF-8
+  return "\uFEFF" + rows.map(function(r) { return r.map(csvCell).join(","); }).join("\r\n");
+}
+function exportCSV() {
+  const dk = dateKey(new Date());
+  const name = "worktime-" + APP_VERSION + "-" + dk + ".csv";
+  if (downloadText(name, buildCSV(), "text/csv;charset=utf-8")) toast("已导出 CSV（Excel 可直接打开）", "ok");
+  else toast("导出失败", "bad");
+}
+
+// ---- 导入备份：结构校验 → 差异预览 → 按 id+updatedAt 合并 ----
+let _pendingImport = null;
+function _importParse(text) {
+  const d = JSON.parse(text);
+  if (!d || !Array.isArray(d.records)) throw new Error("不是有效的 Worktime 备份（缺少 records 数组）");
+  return d;
+}
+function importPreview(d) {
+  _pendingImport = d;
+  const localMap = {};
+  (DB.records || []).forEach(function(r) { localMap[r.id || (r.dateKey + "_" + r.type + "_" + r.time)] = r; });
+  let added = 0, updated = 0, invalid = 0;
+  const samples = [];
+  (d.records || []).forEach(function(r) {
+    if (!r || typeof r.time !== "number") { invalid++; return; }
+    const key = r.id || (r.dateKey + "_" + r.type + "_" + r.time);
+    if (!localMap[key]) { added++; if (samples.length < 8) samples.push("+ " + (r.dateKey || dateKey(new Date(r.time))) + " " + fmtTime(r.time) + " " + (r.type === "out" ? "签退" : "签到")); }
+    else { updated++; if (samples.length < 8) samples.push("~ " + (r.dateKey || dateKey(new Date(r.time))) + " " + fmtTime(r.time) + " " + (r.type === "out" ? "签退" : "签到")); }
+  });
+  $("#import-summary").textContent = "共 " + (d.records || []).length + " 条：新增 " + added + " 条，可能更新 " + updated + " 条" + (invalid ? "，跳过无效 " + invalid + " 条" : "") + "。合并按 id+updatedAt，删除标记会同步。";
+  $("#import-list").innerHTML = samples.map(function(s) { return '<div style="padding:2px 0;color:var(--faint)">' + escapeHtml(s) + '</div>'; }).join("") || '<div style="color:var(--faint)">无有效记录</div>';
+  $("#dlg-import").classList.add("show");
+}
+function importMerge() {
+  if (!_pendingImport) return;
+  const d = _pendingImport;
+  let changed = 0;
+  (d.records || []).forEach(function(r) {
+    if (!r || typeof r.time !== "number") return;
+    const key = r.id || (r.dateKey + "_" + r.type + "_" + r.time);
+    const idx = DB.records.findIndex(function(x) { return (x.id && x.id === r.id) || (x.dateKey + "_" + x.type + "_" + x.time) === key; });
+    if (idx < 0) {
+      if (!r.deleted) { DB.records.push(JSON.parse(JSON.stringify(r))); changed++; }
+    } else {
+      const local = DB.records[idx];
+      if ((r.updatedAt || r.time) >= (local.updatedAt || local.time)) {
+        DB.records[idx] = Object.assign({}, local, r);
+        changed++;
+      }
+    }
+  });
+  // 设置：只补缺失项，dayConfigMap/weekdayRules 按 key 合并（本地优先）
+  ["dayConfigMap", "weekdayRules"].forEach(function(k) {
+    if (d[k] && typeof d[k] === "object") {
+      DB[k] = DB[k] || {};
+      Object.keys(d[k]).forEach(function(kk) { if (!DB[k][kk]) { DB[k][kk] = d[k][kk]; changed++; } });
+    }
+  });
+  if (d.billMode && !DB.billMode) DB.billMode = d.billMode;
+  _pendingImport = null;
+  $("#dlg-import").classList.remove("show");
+  if (changed) { saveDB(); renderAll(); toast("已合并导入 " + changed + " 项", "ok"); }
+  else toast("没有需要合并的新数据", "warn");
+}
+
+// ---- 流水底账（证据层）----
+function renderLedger(month) {
+  const el = $("#ledger-month");
+  month = month || (el && el.value) || dateKey(new Date()).slice(0, 7);
+  const all = (DB.records || []).filter(function(r) { return (r.dateKey || "") === month + "" || (r.dateKey || "").slice(0, 7) === month; });
+  all.sort(function(a, b) { return b.time - a.time; });
+  const box = $("#ledger-list");
+  if (!all.length) { box.innerHTML = '<div style="color:var(--faint);padding:12px">该月暂无打卡记录</div>'; return; }
+  box.innerHTML = all.map(function(r) {
+    const dk = r.dateKey || dateKey(new Date(r.time));
+    const src = r.source || "auto";
+    const acc = r.acc != null ? Math.round(r.acc) + "m" : "—";
+    const dist = r.dist != null ? r.dist + "m" : "—";
+    const coords = (r.lat != null && r.lng != null) ? (Number(r.lat).toFixed(5) + ", " + Number(r.lng).toFixed(5)) : "无坐标";
+    return '<div class="ledger-item' + (r.deleted ? " deleted" : "") + '">' +
+      '<div><b>' + escapeHtml(dk) + " " + fmtTime(r.time) + '</b> ' +
+      '<span class="tag ' + (r.type === "out" ? "in" : "ok") + '">' + (r.type === "out" ? "下班" : "上班") + '</span> ' +
+      '<span class="tag ' + (src === "sim" ? "late" : "in") + '">' + escapeHtml(src) + '</span>' +
+      (r.deleted ? ' <span class="tag late">已删除</span>' : '') + '</div>' +
+      '<div style="color:var(--faint)">精度 ' + escapeHtml(acc) + " · 距工作点 " + escapeHtml(dist) + " · " +
+      '<a href="javascript:void(0)" style="color:var(--acc)" data-lat="' + (r.lat != null ? r.lat : "") + '" data-lng="' + (r.lng != null ? r.lng : "") + '">' + escapeHtml(coords) + '</a></div>' +
+      (r.deleted ? '<button class="fbtn" data-restore="' + escapeHtml(r.id || "") + '" style="padding:2px 8px;font-size:11px">恢复</button>' : '') +
+      '</div>';
+  }).join("");
+}
+
+// ---- 计费模式 ----
+function applyBillMode(mode) {
+  const m = mode === "actual" ? "actual" : "shift";
+  if (!changeDefaults({ billMode: m })) return;
+  toast(m === "actual" ? "已切换：按实际时长计费（加班体现）" : "已切换：按班次计费", "ok");
+}
+
+// ---- 统一班次编辑器（T5.2/T5.4）----
+function openShiftEditor(dk) {
+  const d = dk || dateKey(new Date());
+  const cfg = dayConfigOf(d);
+  $("#se-date").value = d;
+  $("#se-start").value = cfg.start || "09:00";
+  $("#se-end").value = cfg.end || "18:00";
+  $("#se-break").value = cfg.breakMin != null ? cfg.breakMin : 30;
+  $("#se-mode").value = cfg.mode || "shift";
+  $("#se-off").checked = !!cfg.off;
+  const hasSnap = !!(DB.dayConfigMap && DB.dayConfigMap[d]);
+  $("#shift-src-hint").textContent = "该日配置来源：" + (hasSnap ? "按日覆盖/历史快照" : "默认/周几规则（实时）") + "；保存后写入 dayConfigMap，只影响该日期";
+  $("#dlg-shift-editor").classList.add("show");
+}
+function saveShiftEditor() {
+  const dk = $("#se-date").value;
+  if (!dk) { toast("请选择日期", "warn"); return; }
+  const start = $("#se-start").value, end = $("#se-end").value;
+  if (!parseHM(start) || !parseHM(end)) { toast("上下班时间格式不正确", "warn"); return; }
+  const baseCfg = dayConfigOf(dk);
+  DB.dayConfigMap[dk] = {
+    start: start,
+    end: end,
+    breakMin: Math.max(0, parseInt($("#se-break").value, 10) || 0),
+    rate: (baseCfg.rate != null ? baseCfg.rate : DB.payRate),
+    mode: $("#se-mode").value || "shift",
+    off: $("#se-off").checked,
+    frozen: dk < dateKey(new Date())
+  };
+  if (!saveDB()) { toast("保存失败", "bad"); return; }
+  syncNativeSettings();
+  renderAll();
+  $("#dlg-shift-editor").classList.remove("show");
+  toast("已保存 " + dk + " 的班次", "ok");
+}
+
+// ---- 周期班次（按周几）----
+function renderWeekdayList() {
+  const box = $("#weekday-list");
+  const order = [1, 2, 3, 4, 5, 6, 0];
+  box.innerHTML = order.map(function(wd) {
+    const r = (DB.weekdayRules && DB.weekdayRules[wd]) || null;
+    const on = !!r && (r.start != null || r.end != null || r.off);
+    return '<div class="wd-row" data-wd="' + wd + '">' +
+      '<label style="min-width:58px;font-size:12px"><input type="checkbox" class="wd-en" ' + (on ? "checked" : "") + '> ' + WEEKDAY_NAMES[wd] + '</label>' +
+      '<input type="time" class="wd-start" value="' + (r && r.start ? r.start : "") + '">' +
+      '<input type="time" class="wd-end" value="' + (r && r.end ? r.end : "") + '">' +
+      '<input type="tel" class="wd-break" value="' + (r && r.breakMin != null ? r.breakMin : "") + '" placeholder="午休" style="width:52px">' +
+      '<label style="font-size:11px;display:flex;align-items:center;gap:3px"><input type="checkbox" class="wd-off" ' + (r && r.off ? "checked" : "") + '> 休</label>' +
+      '</div>';
+  }).join("");
+}
+function saveWeekdayRules() {
+  const rules = {};
+  document.querySelectorAll("#weekday-list .wd-row").forEach(function(row) {
+    if (!row.querySelector(".wd-en").checked) return;
+    const wd = row.dataset.wd;
+    const s = row.querySelector(".wd-start").value;
+    const e = row.querySelector(".wd-end").value;
+    const b = row.querySelector(".wd-break").value;
+    if (!parseHM(s) || !parseHM(e)) return;
+    rules[wd] = {
+      start: s,
+      end: e,
+      breakMin: b === "" ? (parseInt(DB.dailyBreakMinutes) || 0) : Math.max(0, parseInt(b) || 0),
+      off: row.querySelector(".wd-off").checked
+    };
+  });
+  if (!changeWeekdayRules(rules)) { toast("保存失败", "bad"); return; }
+  $("#dlg-weekday").classList.remove("show");
+  toast("周期班次已保存（历史已锁定）", "ok");
+}
+
+// ---- 趋势图（纯 Canvas）----
+function renderTrend() {
+  const cv = document.getElementById("trend-canvas");
+  if (!cv || !cv.getContext) return;
+  const wrap = cv.parentNode;
+  const cssW = Math.max(160, (wrap && wrap.clientWidth) || cv.clientWidth || 320);
+  const cssH = 90;
+  const dpr = window.devicePixelRatio || 1;
+  cv.width = Math.round(cssW * dpr);
+  cv.height = Math.round(cssH * dpr);
+  if (cv.style) { cv.style.width = "100%"; cv.style.height = cssH + "px"; }
+  const g = cv.getContext("2d");
+  if (!g) return;
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.clearRect(0, 0, cssW, cssH);
+  const days = [];
+  for (let i = 29; i >= 0; i--) { const d = new Date(); d.setDate(d.getDate() - i); days.push(d); }
+  const vals = days.map(function(d) {
+    const dk = dateKey(d);
+    const bMin = getDailyBreakMinutes(DB, dk);
+    const sh = computeShifts(DB.records, dayStartTs(d), dayEndTs(d), bMin);
+    return sh.reduce(function(s, x) { return s + x.minutes; }, 0) / 60;
+  });
+  const peak = Math.max(8, Math.max.apply(null, vals) * 1.15);
+  const padB = 14, top = 6, h = cssH - padB - top;
+  const bw = (cssW - 8) / days.length;
+  g.fillStyle = "rgba(34,211,238,0.75)";
+  vals.forEach(function(v, i) {
+    const bh = Math.max(v > 0 ? 2 : 0, h * v / peak);
+    g.fillRect(4 + i * bw, top + h - bh, Math.max(1, bw - 2), bh);
+  });
+  g.fillStyle = "rgba(139,163,199,0.9)";
+  g.font = "10px sans-serif";
+  g.fillText("近30天工时", 4, cssH - 2);
+  if (Math.max.apply(null, vals) > 0) g.fillText("峰值 " + Math.max.apply(null, vals).toFixed(1) + "h", Math.max(4, cssW - 62), cssH - 2);
+}
+
+// ---- 「全部」月历口径（休息日/漏卡日可见）----
+function renderCalendar() {
+  const container = $("#stats-body");
+  const todayKey = dateKey(new Date());
+  const months = [...new Set((DB.records || []).filter(function(r) { return !r.deleted && r.dateKey; }).map(function(r) { return r.dateKey.slice(0, 7); }))].sort().reverse();
+  if (!months.length) months.push(todayKey.slice(0, 7));
+  let html = "";
+  months.forEach(function(month) {
+    const parts = month.split("-"), y = Number(parts[0]), m = Number(parts[1]);
+    const first = new Date(y, m - 1, 1);
+    const startWd = first.getDay();
+    const daysInMonth = new Date(y, m, 0).getDate();
+    let cells = ["日", "一", "二", "三", "四", "五", "六"].map(function(w) { return '<div class="cal-wd">' + w + '</div>'; }).join("");
+    for (let i = 0; i < startWd; i++) cells += '<div class="cal-cell empty"></div>';
+    for (let day = 1; day <= daysInMonth; day++) {
+      const dk = month + "-" + (day < 10 ? "0" : "") + day;
+      const cfg = dayConfigOf(dk);
+      const recs = (DB.records || []).filter(function(r) { return !r.deleted && r.dateKey === dk; });
+      const hasIn = recs.some(function(r) { return r.type === "in"; });
+      const hasOut = recs.some(function(r) { return r.type === "out"; });
+      let cls = "cal-cell";
+      if (cfg.off) cls += " off";
+      if (hasIn && !hasOut) cls += " missing";
+      else if (hasIn) cls += " worked";
+      if (dk === todayKey) cls += " today";
+      if (dk > todayKey) cls += " future";
+      cells += '<div class="' + cls + '" data-dk="' + dk + '">' + day + '</div>';
+    }
+    html += '<div class="cal-month"><div class="cal-title">' + y + "年" + m + '月</div><div class="cal-grid">' + cells + '</div></div>';
+  });
+  container.innerHTML = html;
+}
+
+// ---- 定时提醒（时间触发兜底）----
+function scheduleTimeReminders() {
+  const P = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.LocalNotifications;
+  if (!P || !P.schedule) return;
+  try {
+    const dk = dateKey(new Date());
+    const cfg = dayConfigOf(dk);
+    if (cfg.off) return;
+    const t = cfgTimesFor(dk, cfg);
+    const now = Date.now();
+    const items = [];
+    const remindIn = t.startMs - 15 * 60000;
+    if (remindIn > now) items.push({ id: 1001, title: "WorkTime", body: "还有 15 分钟到上班时间（" + (cfg.start || fmtTime(t.startMs)) + "），记得签到", schedule: { at: new Date(remindIn) } });
+    const remindOut = t.endMs + 60000;
+    if (remindOut > now) items.push({ id: 1002, title: "WorkTime", body: "已到下班时间（" + (cfg.end || fmtTime(t.endMs)) + "），记得签退", schedule: { at: new Date(remindOut) } });
+    if (items.length) P.schedule({ notifications: items }).catch(function(e) { Logger.warn("time reminder schedule:", e); });
+  } catch (e) { Logger.error("scheduleTimeReminders:", e); }
+}
+
+// ---- 版本检查（GitHub releases/latest）----
+function checkAppVersion() {
+  try {
+    if (!window.fetch) return;
+    fetch("https://api.github.com/repos/wake2008dingtalk-sys/worktime-app/releases/latest", { headers: { "Accept": "application/vnd.github+json" } })
+      .then(function(r) { return r.ok ? r.json() : null; })
+      .then(function(d) {
+        if (!d || !d.tag_name) return;
+        const seen = localStorage.getItem("last_seen_release") || "";
+        if (seen !== d.tag_name) {
+          localStorage.setItem("last_seen_release", d.tag_name);
+          toast("发现新版本：" + (d.name || d.tag_name) + "（设置页可下载）", "warn", 5000);
+        }
+      })
+      .catch(function() {});
+  } catch (e) {}
+}
+
 
 /* ===================== 全局状态 ===================== */
 let lastPos = null;
@@ -1651,12 +2213,11 @@ function forceCheckoutIfDue() {
 }
 
 function checkFence(pos) {
-  // v45: checkFence 只处理上班自动签到，不再签退
   if (!pos) return;
   const nowIn = isInsideFence(pos);
   const now = new Date();
   const todayKey = dateKey(now);
-  const { startMs, startStr } = getTodayWorkTimes();
+  const { startMs, startStr, cfg } = getTodayWorkTimes();
   const nowMs = now.getTime();
 
   // 跨天重置围栏状态
@@ -1666,97 +2227,35 @@ function checkFence(pos) {
 
   // === 上班自动签到：在围栏内 + 已到上班时间 + 当天未签到 ===
   if (nowIn) {
-    if (fenceState.inside === true) {
-      fenceState.count++;
-    } else {
-      fenceState.inside = true;
-      fenceState.count = 1;
-    }
-    // 连续1次确认在围栏内即触发签到
-    if (DB.autoCheckIn && fenceState.count >= 1 && fenceState.lastSign !== "in") {
-      if (nowMs >= startMs) {
-        const rec = addRecord("in", pos);
+    fenceState.count = fenceState.inside === true ? fenceState.count + 1 : 1;
+    fenceState.inside = true;
+    // T7.2：连续 2 次确认在围栏内才触发签到，避免 GPS 漂移误打卡
+    if (DB.autoCheckIn && fenceState.count >= 2 && fenceState.lastSign !== "in") {
+      // 休息日（off）时间门限视为全天开放；普通日必须已到上班时间
+      const timeOk = cfg.off || nowMs >= startMs;
+      if (timeOk) {
+        const rec = addRecord("in", pos, locMode === "sim" ? "sim" : "auto");
         if (rec) {
           fenceState.lastSign = "in";
-          notify("WorkTime", "已到达工作地点，自动签到上班（" + startStr + "）");
-          toast("已到达工作地点，自动签到上班（" + startStr + "）", "ok");
+          const extra = cfg.off ? "（休息日上班）" : "";
+          notify("WorkTime", "已到达工作地点，自动签到上班" + extra + "（" + fmtTime(rec.time) + "）");
+          toast("已到达工作地点，自动签到上班" + extra, "ok");
           renderAll();
         } else {
-          // addRecord 返回 null 表示已经签到过了，也更新围栏状态避免重复提醒
           fenceState.lastSign = "in";
         }
       }
       // else: 提前到围栏但未到上班时间 → 不签到
     }
   } else {
-    if (fenceState.inside === false) {
-      fenceState.count++;
-    } else {
-      fenceState.inside = false;
-      fenceState.count = 1;
-    }
+    fenceState.count = fenceState.inside === false ? fenceState.count + 1 : 1;
+    fenceState.inside = false;
   }
 }
 
 /* ===================== 智能签到提醒 ===================== */
-
-/* ===================== 异常检测 ===================== */
-function detectAnomalies() {
-  const records = DB.records;
-  const anomalies = [];
-  const todayKey = dateKey(new Date());
-  
-  // 1. 检测当日有上班无下班
-  const todayRecords = records.filter(r => dateKey(new Date(r.time)) === todayKey);
-  const hasIn = todayRecords.some(r => r.type === "in");
-  const hasOut = todayRecords.some(r => r.type === "out");
-  if (hasIn && !hasOut) {
-    anomalies.push("今天已打卡上班，但还未签退");
-  }
-  
-  // 2. 检测连续工作天数
-  let streak = 0;
-  const sortedDays = [...new Set(records.map(r => dateKey(new Date(r.time))))].sort().reverse();
-  for (let i = 0; i < sortedDays.length; i++) {
-    const day = sortedDays[i];
-    const dayRecs = records.filter(r => dateKey(new Date(r.time)) === day);
-    const dayHasIn = dayRecs.some(r => r.type === "in");
-    if (dayHasIn) streak++; else break;
-  }
-  if (streak >= 7) {
-    anomalies.push("连续工作" + streak + "天，建议适当休息");
-  }
-  
-  // 3. 检测昨日未签退
-  const yesterday = new Date();
-  yesterday.setDate(yesterday.getDate() - 1);
-  const yestKey = dateKey(yesterday);
-  const yestRecs = records.filter(r => dateKey(new Date(r.time)) === yestKey);
-  const yestHasIn = yestRecs.some(r => r.type === "in");
-  const yestHasOut = yestRecs.some(r => r.type === "out");
-  if (yestHasIn && !yestHasOut) {
-    anomalies.push("昨日（" + yestKey + "）打卡上班但未签退");
-  }
-  
-  return anomalies;
-}
-
-function showAnomalyWarnings() {
-  const anomalies = detectAnomalies();
-  if (anomalies.length > 0) {
-    const msg = anomalies.join("；");
-    toast("⚠ " + msg, "warn");
-    // 只在每天首次打开时弹通知
-    const todayWarned = localStorage.getItem("anomaly_warned_" + dateKey(new Date()));
-    if (!todayWarned) {
-      notify("考勤异常提醒", msg);
-      localStorage.setItem("anomaly_warned_" + dateKey(new Date()), "1");
-    }
-  }
-}
-
 function smartReminder() {
-  // v45: 只提醒上班签到，不提醒签退
+  // v3：休息日不提醒；签退提醒由定时提醒（T7.3）负责
   const now = new Date();
   const nowMs = now.getTime();
   const { startMs, startStr } = getTodayWorkTimes();
@@ -2174,64 +2673,45 @@ function latLngToPx(lat, lng) {
 }
 
 /* ===================== AI 工时分析 ===================== */
-function renderAIAnalysis() {
-  const el = document.getElementById("ai-analysis");
-  if (!el) return;
-  const records = DB.records.filter(r => !r.deleted); // v107修复：统计忽略软删除；字段名修正 hourlyRate→payRate
-  if (records.length === 0) { el.innerHTML = "<p>暂无工时记录，开始打卡后将为您生成分析。</p>"; return; }
-  
-  const now = new Date();
-  let totalHours7d = 0, totalIncome7d = 0, workDays7d = 0;
-  for (let i = 0; i < 7; i++) {
-    const d = new Date(now); d.setDate(d.getDate() - i);
-    const key = dateKey(d);
-    const dayRecs = records.filter(r => dateKey(new Date(r.time)) === key);
-    const dayHours = computeDayHours(dayRecs);
-    if (dayHours > 0) { totalHours7d += dayHours; totalIncome7d += computePay(dayHours * 60,
-        DB.payRate); workDays7d++; }
-  }
-  
-  const avgHours = workDays7d > 0 ? (totalHours7d / workDays7d).toFixed(1) : 0;
-  let suggestions = [];
-  if (avgHours > 10) suggestions.push("⚠ 日均工时较长，注意休息");
-  if (workDays7d >= 7) suggestions.push("⚠ 连续7天工作，建议适当休息");
-  if (DB.payRate < 20) suggestions.push("💡 当前时薪较低，可考虑协商涨薪");
-  if (suggestions.length === 0) suggestions.push("✅ 工时节奏良好，继续保持");
-  
-  el.innerHTML = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px"><div style="background:var(--panel);padding:10px;border-radius:10px;text-align:center"><div style="font-size:20px;color:var(--acc);font-weight:700">' + totalHours7d.toFixed(1) + 'h</div><div style="font-size:11px;color:var(--faint)">近7天总工时</div></div><div style="background:var(--panel);padding:10px;border-radius:10px;text-align:center"><div style="font-size:20px;color:var(--ok);font-weight:700">' + fmtMoney(totalIncome7d) + '</div><div style="font-size:11px;color:var(--faint)">近7天总收入</div></div></div><div style="font-size:12px"><p style="margin-bottom:6px"><strong>智能建议：</strong></p>' + suggestions.map(function(s) { return '<p style="margin:4px 0">' + s + '</p>'; }).join("") + '</div>';
-}
-
-/* ===================== 异常检测 ===================== */
+/* ===================== 异常检测（唯一实现，v3 起生效）===================== */
 function detectAnomalies() {
-  const records = DB.records;
+  const records = (DB.records || []).filter(r => !r.deleted); // 忽略软删除墓碑
   const anomalies = [];
   const todayKey = dateKey(new Date());
-  const todayRecs = records.filter(function(r) { return dateKey(new Date(r.time)) === todayKey; });
-  if (todayRecs.some(function(r) { return r.type === "in"; }) && !todayRecs.some(function(r) { return r.type === "out"; })) {
-    anomalies.push("今天已打卡上班，但还未签退");
+  const todayRecs = records.filter(r => (r.dateKey || dateKey(new Date(r.time))) === todayKey);
+  if (todayRecs.some(r => r.type === "in") && !todayRecs.some(r => r.type === "out")) {
+    anomalies.push("今天已上班签到，但还未签退");
   }
-  
+  // 连续工作天数
   let streak = 0;
-  const sortedDays = [...new Set(records.map(function(r) { return dateKey(new Date(r.time)); }))].sort().reverse();
-  for (let i = 0; i < sortedDays.length; i++) {
-    const dayRecs = records.filter(function(r) { return dateKey(new Date(r.time)) === sortedDays[i]; });
-    if (dayRecs.some(function(r) { return r.type === "in"; })) streak++; else break;
+  const days = [...new Set(records.map(r => r.dateKey || dateKey(new Date(r.time))))].sort().reverse();
+  for (let i = 0; i < days.length; i++) {
+    const dayRecs = records.filter(r => (r.dateKey || dateKey(new Date(r.time))) === days[i]);
+    if (dayRecs.some(r => r.type === "in")) streak++; else break;
   }
-  if (streak >= 7) anomalies.push("连续工作" + streak + "天，建议适当休息");
-  
-  const yesterday = new Date(); yesterday.setDate(yesterday.getDate() - 1);
-  const yestKey = dateKey(yesterday);
-  const yestRecs = records.filter(function(r) { return dateKey(new Date(r.time)) === yestKey; });
-  if (yestRecs.some(function(r) { return r.type === "in"; }) && !yestRecs.some(function(r) { return r.type === "out"; })) {
-    anomalies.push("昨日打卡上班但未签退");
+  if (streak >= 7) anomalies.push("连续工作 " + streak + " 天，建议适当休息");
+  // 昨日未签退
+  const yest = new Date(); yest.setDate(yest.getDate() - 1);
+  const yestKey = dateKey(yest);
+  const yestRecs = records.filter(r => (r.dateKey || dateKey(new Date(r.time))) === yestKey);
+  if (yestRecs.some(r => r.type === "in") && !yestRecs.some(r => r.type === "out")) {
+    anomalies.push("昨日（" + yestKey + "）上班签到但未签退");
   }
   return anomalies;
 }
 
 function showAnomalyWarnings() {
   const anomalies = detectAnomalies();
+  const box = document.getElementById("anomaly-box");
+  if (box) {
+    if (anomalies.length) {
+      box.style.display = "block";
+      box.innerHTML = anomalies.map(a => '<div class="anomaly-item">⚠ ' + escapeHtml(a) + '</div>').join("");
+    } else {
+      box.style.display = "none"; box.innerHTML = "";
+    }
+  }
   if (anomalies.length > 0) {
-    toast("⚠ " + anomalies.join("；"), "warn");
     const warnKey = "anomaly_warned_" + dateKey(new Date());
     if (!localStorage.getItem(warnKey)) {
       notify("考勤异常提醒", anomalies.join("；"));
@@ -2251,60 +2731,59 @@ function renderAll() {
 function renderOverview() {
   const today = new Date();
   const start = dayStartTs(today), end = dayEndTs(today);
+  const todayKey = dateKey(today);
+  const cfg = dayConfigOf(todayKey);
+  const t = cfgTimesFor(todayKey, cfg);
   const minutes = dayMinutes(DB.records, start, end);
-  const pay = computePay(minutes, DB.payRate);
-  const targetMin = getDailyTargetMinutes(DB, dateKey(today));
+  const rateVal = (cfg.rate != null ? cfg.rate : DB.payRate) || 0;
+  const pay = computePay(minutes, rateVal);
+  const targetMin = getDailyTargetMinutes(DB, todayKey);
   const progress = targetMin > 0 ? Math.min(100, Math.round(minutes / targetMin * 100)) : 0;
+  const modeLabel = cfg.mode === "actual" ? "按实际" : "按班次";
 
   $("#ov-hours").textContent = fmtDurShort(minutes);
-  let subText = minutes > 0 ? fmtDur(minutes) : "今日尚未开始";
-  const todayKey = dateKey(today);
-  const breakMin = getDailyBreakMinutes(DB, todayKey);
-  if (breakMin > 0) {
-    subText += ` · 午休扣除 ${fmtDurShort(breakMin)}`;
-  }
-  const firstIn = DB.records.filter(r => r.time >= start && r.time < end && r.type === "in").sort((a,
-      b)=>a.time-b.time)[0];
-  if (firstIn) {
-    const todayKey = dateKey(today);
-    const expStart = (DB.dailyStartTimeMap && DB.dailyStartTimeMap[todayKey]) || DB.dailyStartTime || "09:00";
-    const [h, m] = expStart.split(':').map(Number);
-    const expMs = start + h*3600000 + m*60000;
-    if (firstIn.time > expMs) {
-      const lateMin = Math.round((firstIn.time - expMs)/60000);
-      subText += ` · 迟到 ${fmtDurShort(lateMin)}`;
-    } else {
-      subText += ` · 准时上班`;
-    }
+  let subText = minutes > 0 ? fmtDur(minutes) : (cfg.off ? "休息日" : "今日尚未开始");
+  const breakMin = Math.max(0, parseInt(cfg.breakMin) || 0);
+  if (breakMin > 0) subText += ` · 午休扣除 ${fmtDurShort(breakMin)}`;
+  const firstIn = DB.records.filter(r => !r.deleted && r.time >= start && r.time < end && r.type === "in")
+      .sort((a, b) => a.time - b.time)[0];
+  if (firstIn && !cfg.off) {
+    const lateMin = Math.round((firstIn.time - t.startMs) / 60000);
+    if (lateMin > 1) subText += ` · 迟到 ${fmtDurShort(lateMin)}`;
+    else if (lateMin >= -1) subText += ` · 准时上班`;
+    if (lateMin > 1 || lateMin < -1) subText += `（实到 ${fmtTime(firstIn.time)}）`;
   }
   $("#ov-hours-sub").textContent = subText;
   $("#ov-pay").textContent = fmtMoney(pay);
-  $("#ov-pay-sub").textContent = "@ ¥" + DB.payRate + "/时";
-  $("#ov-progress").textContent = progress + "%";
-  $("#ov-target").textContent = "目标 " + fmtDurShort(targetMin);
+  $("#ov-pay-sub").textContent = "@ ¥" + rateVal + "/时 · " + modeLabel;
+  $("#ov-progress").textContent = cfg.off ? (minutes > 0 ? "休·出勤" : "休息日") : progress + "%";
+  $("#ov-target").textContent = cfg.off ? "休息日 · 不计目标" : "目标 " + fmtDurShort(targetMin);
 
-  $("#pg-bar").style.width = progress + "%";
-  $("#pg-label-text").textContent = fmtDurShort(minutes) + " / " + fmtDurShort(targetMin);
+  $("#pg-bar").style.width = (cfg.off ? (minutes > 0 ? 100 : 0) : progress) + "%";
+  $("#pg-label-text").textContent = fmtDurShort(minutes) + " / " + (cfg.off ? "休" : fmtDurShort(targetMin));
+
+  // 考勤异常提醒展示位
+  showAnomalyWarnings();
 
   const btn = $("#btn-check");
   const od = isOnDuty(DB.records);
-  btn.textContent = od ? "◼ 定位签退" : "📌 上班签到";
+  btn.textContent = od ? "◼ 下班签退" : "📌 上班签到";
   btn.className = "qbtn " + (od ? "ghost" : "primary");
-  btn.disabled = !lastPos && !locMode;
+  btn.disabled = !od && !lastPos && !locMode; // 在岗时即使没有定位也允许签退
 
   const chip = $("#loc-chip");
   if (lastPos) {
     chip.className = "status-chip on";
-    $("#loc-txt").textContent = locMode === "gps" ? "GPS 定位中" : "模拟定位中";
+    $("#loc-txt").textContent = locMode === "gps" ? "GPS 定位中" : (locMode === "sim" ? "模拟定位中" : "定位中");
     const d = lastPos.lat != null ? Math.round(haversine(lastPos.lat, lastPos.lng, DB.workPlace.lat,
         DB.workPlace.lng)) : null;
     const inPlace = d != null && d <= (DB.fenceRadius || 200);
-    // 检测工作点是否仍为默认未设置状态（苏州 31.2988,120.5853 或 北京 39.9088,116.3974）
+    // 检测工作点是否仍为默认未设置状态
     const isDefaultPlace = (Math.abs(DB.workPlace.lat - 31.2988) < 0.0001 && Math.abs(DB.workPlace.lng - 120.5853) < 0.0001) ||
                            (Math.abs(DB.workPlace.lat - 39.9088) < 0.0001 && Math.abs(DB.workPlace.lng - 116.3974) < 0.0001);
     const isWorkPlaceUnset = isDefaultPlace && d != null && d > 10000;
     if (isWorkPlaceUnset) {
-      $("#loc-detail").textContent = "⚠️ 工作地点未设置，请下滑到「我的设置」→ 点击「设为当前位置」";
+      $("#loc-detail").textContent = "⚠️ 工作地点未设置，请到「我的设置」→ 点击「设为当前位置」";
     } else if (inPlace) {
       $("#loc-detail").textContent = "✅ 已在围栏内（" + (DB.fenceRadius || 200) + "m）";
     } else if (d != null) {
@@ -2321,7 +2800,11 @@ function renderOverview() {
 function renderRecords() {
   const today = new Date();
   const start = dayStartTs(today), end = dayEndTs(today);
-  const breakMin = getDailyBreakMinutes(DB, dateKey(today));
+  const dk = dateKey(today);
+  const cfg = dayConfigOf(dk);
+  const t = cfgTimesFor(dk, cfg);
+  const breakMin = Math.max(0, parseInt(cfg.breakMin) || 0);
+  const rateVal = (cfg.rate != null ? cfg.rate : DB.payRate) || 0;
   const shifts = computeShifts(DB.records, start, end, breakMin);
   const tbody = $("#rec-list");
   const emptyEl = $("#rec-empty");
@@ -2330,22 +2813,31 @@ function renderRecords() {
   emptyEl.style.display = "none";
   shifts.forEach((s, idx) => {
     const row = document.createElement("tr");
-    const dk = dateKey(new Date(s.in));
-    const inTime = (DB.dailyStartTimeMap && DB.dailyStartTimeMap[dk] !== undefined)
-      ? DB.dailyStartTimeMap[dk] : (DB.dailyStartTime || "09:00");
-    const inSource = '<span style="color:var(--faint);font-size:10px">(设置)</span>';
-    const outTime = (DB.dailyEndTimeMap && DB.dailyEndTimeMap[dk] !== undefined)
-      ? DB.dailyEndTimeMap[dk] : (DB.dailyEndTime || "18:00");
-    const outSource = '<span style="color:var(--faint);font-size:10px">(设置)</span>';
+    const realIn = fmtTime(s.in);
+    const legacyIn = Math.abs(s.in - t.startMs) < 60000;
+    const billIn = cfg.start || t.startStr, billOut = cfg.end || t.endStr;
+    const inCell = legacyIn
+      ? escapeHtml(billIn)
+      : escapeHtml(billIn) + '<br><span style="color:var(--acc);font-size:11px">实 ' + escapeHtml(realIn) + '</span>';
+    let outCell = '<span style="color:var(--faint)">—</span>';
+    if (s.out) {
+      const legacyOut = Math.abs(s.out - t.endMs) < 60000;
+      outCell = legacyOut
+        ? escapeHtml(billOut)
+        : escapeHtml(billOut) + '<br><span style="color:var(--acc);font-size:11px">实 ' + escapeHtml(fmtTime(s.out)) + '</span>';
+    }
     const hours = (s.minutes / 60).toFixed(1);
-    const income = fmtMoney((s.minutes / 60) * (DB.payRate || 0));
-    const status = s.out ? (s.rawMinutes - s.breakMinutes > 0 ? `<span class="tag ok">正常</span>` :
-        `<span class="tag warn">异常</span>`) : `<span class="tag in">工作中</span>`;
+    const income = fmtMoney((s.minutes / 60) * rateVal);
+    const src = s.source || "auto";
+    const srcBadge = src === "sim" ? '<span class="tag late">模拟</span>' :
+        (src === "manual" ? '<span class="tag in">手动</span>' : (src === "native" ? '<span class="tag in">原生</span>' : ''));
+    const status = !s.out ? '<span class="tag in">工作中</span>'
+        : (s.rawMinutes - s.breakMinutes > 0 ? '<span class="tag ok">正常</span>' : '<span class="tag warn">异常</span>');
     row.innerHTML = `
       <td>${escapeHtml(dk)}${dk === dateKey(today) ? ' <span style="color:var(--ok)">今天</span>' : ""}</td>
-      <td><span class="tag in">上班</span></td>
-      <td>${escapeHtml(inTime)}${inSource}</td>
-      <td>${escapeHtml(outTime)}${outSource}</td>
+      <td>${srcBadge || '<span class="tag in">自动</span>'}</td>
+      <td>${inCell}</td>
+      <td>${outCell}</td>
       <td>${hours}h</td>
       <td>${income}</td>
       <td>${status}</td>
@@ -2358,6 +2850,13 @@ function renderRecords() {
   });
 }
 function renderStats() {
+  renderTrend();
+  if (curPeriod === "all") {
+    // T5.5：「全部」改为按月日历网格——休息日/漏卡日可见
+    $("#stats-empty").style.display = "none";
+    renderCalendar();
+    return;
+  }
   const today = new Date();
   let days = [];
   if (curPeriod === "7") {
@@ -2399,13 +2898,15 @@ function renderStats() {
       const dk = dateKey(d);
       const dStart = dayStartTs(d);
       const dEnd = dayEndTs(d);
-      const breakMin = getDailyBreakMinutes(DB, dk);
+      const cfg = dayConfigOf(dk);
+      const breakMin = Math.max(0, parseInt(cfg.breakMin) || 0);
       const targetMin = getDailyTargetMinutes(DB, dk);
       const targetHours = targetMin / 60;
+      const rateVal = (cfg.rate != null ? cfg.rate : DB.payRate) || 0;
       const shifts = computeShifts(DB.records, dStart, dEnd, breakMin);
-      const dayMinutes = shifts.reduce((s, x) => s + x.minutes, 0);
-      const dayHours = dayMinutes / 60;
-      const income = dayHours * (DB.payRate || 0);
+      const dayMinutesTotal = shifts.reduce((s, x) => s + x.minutes, 0);
+      const dayHours = dayMinutesTotal / 60;
+      const income = dayHours * rateVal;
       const completion = targetHours > 0 ? Math.round((dayHours / targetHours) * 100) : 0;
       const hasSign = shifts.length > 0;
       const isToday = dk === dateKey(today);
@@ -2417,12 +2918,12 @@ function renderStats() {
       }
       
       rowsHtml += `<tr data-dk="${dk}">
-        <td class="date-cell">${dk}${isToday ? ' <span style="color:var(--ok);font-size:10px">今天</span>' : ""}</td>
+        <td class="date-cell">${dk}${isToday ? ' <span style="color:var(--ok);font-size:10px">今天</span>' : ""}${cfg.off ? ' <span style="color:var(--faint);font-size:10px">休</span>' : ""}</td>
         <td class="hours-cell">${hasSign ? dayHours.toFixed(1) + 'h' : '<span style="color:var(--faint)">—</span>'}</td>
         <td>${breakMin}min</td>
         <td class="money-cell">${hasSign ? fmtMoney(income) : '<span style="color:var(--faint)">—</span>'}</td>
-        <td>${targetHours}h</td>
-        <td><span class="tag ${completion >= 100 ? 'ok' : (completion >= 80 ? 'warn' : 'late')}">${completion}%</span></td>
+        <td>${cfg.off ? '休' : targetHours + 'h'}</td>
+        <td><span class="tag ${cfg.off ? 'in' : (completion >= 100 ? 'ok' : (completion >= 80 ? 'warn' : 'late'))}">${cfg.off ? '休' : completion + '%'}</span></td>
         <td>${hasSign ? `<button class="fbtn edit-btn" data-action="edit-shift" data-dk="${dk}" style="padding:2px 6px;font-size:10px">修改</button>` : '<span style="color:var(--faint)">—</span>'}</td>
       </tr>`;
     });
@@ -2484,6 +2985,25 @@ function renderSettings() {
     "手动：需要时点击顶部 VPN保活 按钮手动启动" : 
     "自动：保存设置后自动跳转VPN设置";
   $("#dh-default").textContent = DB.dailyHours;
+  // v3 设置回显（账面配置/计费模式/周几规则）
+  const cfgToday = dayConfigOf(dateKey(new Date()));
+  const hoursDisplayEl = document.getElementById("set-hours-display");
+  if (hoursDisplayEl && ae !== hoursDisplayEl) hoursDisplayEl.textContent = (getDailyTargetMinutes(DB, dateKey(new Date())) / 60).toFixed(1);
+  const bill = DB.billMode || "shift";
+  const billShiftBtn = document.getElementById("bill-shift"), billActualBtn = document.getElementById("bill-actual");
+  if (billShiftBtn && billActualBtn) {
+    billShiftBtn.classList.toggle("primary", bill !== "actual");
+    billActualBtn.classList.toggle("primary", bill === "actual");
+  }
+  const billDesc = document.getElementById("bill-desc");
+  if (billDesc) billDesc.textContent = bill === "actual" ? "按实际：工时 = 实际在场 − 午休（加班体现）" : "按班次：工时 = 设置班次 − 午休";
+  const wdDesc = document.getElementById("weekday-desc");
+  if (wdDesc) {
+    const n = Object.keys(DB.weekdayRules || {}).length;
+    wdDesc.textContent = n ? ("已启用 " + n + " 天周期规则") : "未设置（沿用默认）";
+  }
+  const modeDesc = document.getElementById("mode-desc");
+  if (modeDesc && cfgToday.off) modeDesc.textContent = "今天是休息日（仍可自动签到）";
   if (bmap && workMarker) updateWorkLabel();
   // 更新云同步绑定状态（v107修复：改用全局 CloudSync——原 typeof 守卫恒为 false，绑定 UI 从不渲染）
   if (window.CloudSync && typeof window.CloudSync.renderCloudBindStatus === 'function') window.CloudSync.renderCloudBindStatus();
@@ -2851,28 +3371,38 @@ function pollCheckIn() {
 }
 
 function doCheck() {
-  // v45: 只处理上班签到，不签退。时间固定为设置上班时间
+  // T2.1：按在岗状态分流 —— 未在岗=上班签到（需围栏内），在岗=下班签退（随处可签）
   const pos = lastPos || {};
-  // 检查是否在围栏内
-  if (!isInsideFence(pos)) {
-    toast("未在「工作地点" + (DB.fenceRadius || 200) + "米」范围内，无法签到", "warn");
+  const onDuty = isOnDuty(DB.records);
+  if (!onDuty) {
+    if (!isInsideFence(pos)) {
+      toast("未在「工作地点" + (DB.fenceRadius || 200) + "米」范围内，无法签到", "warn");
+      return;
+    }
+    const rec = addRecord("in", pos, "manual");
+    if (rec) {
+      fenceState.lastSign = "in";
+      notify("WorkTime", "上班签到成功（" + fmtTime(rec.time) + "）");
+      toast("签到成功 · " + fmtTime(rec.time), "ok");
+      renderAll();
+    }
     return;
   }
-  const rec = addRecord("in", pos);
+  const rec = addRecord("out", pos, "manual");
   if (rec) {
-    fenceState.lastSign = "in";
-    const { startStr } = getTodayWorkTimes();
-    notify("WorkTime", "手动签到上班成功（" + startStr + "）");
-    toast("签到成功（" + startStr + "）", "ok");
+    fenceState.lastSign = "out";
+    const distTxt = (pos && isFinite(distToWork(pos))) ? " · 距工作点 " + Math.round(distToWork(pos)) + "m" : "";
+    notify("WorkTime", "下班签退成功（" + fmtTime(rec.time) + "）");
+    toast("签退成功 · " + fmtTime(rec.time) + distTxt, "ok");
     renderAll();
   }
 }
 
 /* ===================== 事件绑定 ===================== */
 $("#btn-gps").addEventListener("click", () => {
-  if (locMode === "gps") { stopLoc(); toast("已停止 GPS"); }
-  else if (locMode === "sim") { stopLoc(); startGPS(); }
-  else { startSim(); }
+  // T7.1：GPS 按钮只做「启动/停止真实定位」；模拟定位入口已移到设置页「演示模式」
+  if (locMode === "gps") { stopLoc(); toast("已停止 GPS", "ok"); }
+  else { startGPS(); }
 });
 $("#btn-check").addEventListener("click", doCheck);
 
@@ -2895,20 +3425,19 @@ $("#btn-bmap").addEventListener("click", () => {
 $("#save-pay").addEventListener("click", () => {
   const r = parseFloat($("#set-pay").value);
   if (isNaN(r) || r < 0 || r > 9999) { toast("请输入有效时薪", "warn"); return; }
-  DB.payRate = Math.round(r * 100) / 100;
-  if (!saveDB()) { toast("保存失败：浏览器限制了本地存储，请尝试更换浏览器或使用导出数据功能备份", "bad"); return; }
-  renderAll();
-  toast("时薪已更新", "ok");
+  // T4.2：时薪变更先冻结历史，历史日收入按快照 rate 锁定，今天起按新值
+  if (!changeDefaults({ payRate: Math.round(r * 100) / 100 })) {
+    toast("保存失败：浏览器限制了本地存储，请尝试更换浏览器或使用导出数据功能备份", "bad"); return;
+  }
+  toast("时薪已更新（历史记录已锁定）", "ok");
 });
 $("#save-break").addEventListener("click", () => {
   const v = parseInt($("#set-break").value, 10);
   if (isNaN(v) || v < 0 || v > 300) { toast("午休时长请输入 0–300 分钟之间的数字", "warn"); return; }
-  DB.dailyBreakMinutes = v;
-  const times = getTodayWorkTimes();
-  DB.dailyHours = times.hours;
-  if (!saveDB()) { toast("保存失败：浏览器限制了本地存储", "bad"); return; }
-  renderAll();
-  toast("默认每日午休已更新，目标工时已同步为 " + times.hours.toFixed(1) + " 小时", "ok");
+  if (!changeDefaults({ dailyBreakMinutes: v })) {
+    toast("保存失败：浏览器限制了本地存储", "bad"); return;
+  }
+  toast("默认每日午休已更新（历史已锁定）", "ok");
 });
 $("#save-fence").addEventListener("click", () => {
   const v = parseInt($("#set-fence").value, 10);
@@ -2921,23 +3450,20 @@ $("#save-fence").addEventListener("click", () => {
 });
 $("#save-start").addEventListener("click", () => {
   const v = $("#set-start").value;
-  if (!v || !/^\d{2}:\d{2}$/.test(v)) { toast("请输入有效的上班时间（HH:MM）", "warn"); return; }
-  DB.dailyStartTime = v;
-  const times = getTodayWorkTimes();
-  DB.dailyHours = times.hours;
-  if (!saveDB()) { toast("保存失败：浏览器限制了本地存储，请尝试更换浏览器或使用导出数据功能备份", "bad"); return; }
-  renderAll();
-  toast("默认每日上班时间已更新，目标工时已同步为 " + times.hours.toFixed(1) + " 小时", "ok");
+  if (!parseHM(v)) { toast("请输入有效的上班时间（HH:MM）", "warn"); return; }
+  // T3.2：默认值变更走 changeDefaults（先冻结历史再应用新值）
+  if (!changeDefaults({ dailyStartTime: v })) {
+    toast("保存失败：浏览器限制了本地存储，请尝试更换浏览器或使用导出数据功能备份", "bad"); return;
+  }
+  toast("默认上班时间已更新（历史记录已锁定）", "ok");
 });
 $("#save-end").addEventListener("click", () => {
   const v = $("#set-end").value;
-  if (!v || !/^\d{2}:\d{2}$/.test(v)) { toast("请输入有效的下班时间（HH:MM）", "warn"); return; }
-  DB.dailyEndTime = v;
-  const times = getTodayWorkTimes();
-  DB.dailyHours = times.hours;
-  if (!saveDB()) { toast("保存失败：浏览器限制了本地存储，请尝试更换浏览器或使用导出数据功能备份", "bad"); return; }
-  renderAll();
-  toast("默认每日下班时间已更新，目标工时已同步为 " + times.hours.toFixed(1) + " 小时", "ok");
+  if (!parseHM(v)) { toast("请输入有效的下班时间（HH:MM）", "warn"); return; }
+  if (!changeDefaults({ dailyEndTime: v })) {
+    toast("保存失败：浏览器限制了本地存储，请尝试更换浏览器或使用导出数据功能备份", "bad"); return;
+  }
+  toast("默认下班时间已更新（历史记录已锁定）", "ok");
 });
 $("#edit-daily").addEventListener("click", () => {
   const list = $("#dh-list");
@@ -3188,9 +3714,22 @@ function renderSugList(items) {
 }
 
 async function searchPlaceSuggestions(query) {
-  // v109：Place Web API 需服务端类型 AK；未单独配置时回退 BAIDU_MAP_AK 尝试
+  // T6.2：优先走 CloudBase 云函数代理（服务端 AK 只存在云函数环境变量里）
+  try {
+    if (window.CloudSync && typeof window.CloudSync.cloudCall === "function") {
+      const res = await window.CloudSync.cloudCall("placeSearch", { query: query, region: "全国" });
+      const data = (res && res.result) ? res.result : res;
+      if (data && data.status === 0 && Array.isArray(data.result)) {
+        const items = data.result.filter(function(it) {
+          return it.location && Math.abs(it.location.lat) > 0.01 && Math.abs(it.location.lng) > 0.01;
+        });
+        if (items.length) return { ok: true, items: items, status: 0, via: "cloud" };
+      }
+    }
+  } catch (e) { Logger.warn("cloud placeSearch failed, fallback to direct:", e); }
+  // 回退：旧版直连 Place Web API（仅当客户端仍配置了 AK 时；CI 构建如不再注入 AK 则该路径自动失效）
   const ak = BAIDU_PLACE_AK || BAIDU_MAP_AK;
-  if (!ak || ak === "YOUR_AK_HERE") return { ok: false, items: null, message: "AK 未配置" };
+  if (!ak || ak === "YOUR_AK_HERE") return { ok: false, items: null, message: "服务端检索未配置（请部署 placeSearch 云函数）" };
   const url = "https://api.map.baidu.com/place/v2/suggestion?query=" + encodeURIComponent(query)
     + "&region=" + encodeURIComponent("全国")
     + "&output=json&ak=" + encodeURIComponent(ak);
@@ -3203,7 +3742,7 @@ async function searchPlaceSuggestions(query) {
   const items = data.result.filter(function(it) {
     return it.location && Math.abs(it.location.lat) > 0.01 && Math.abs(it.location.lng) > 0.01;
   });
-  return { ok: true, items: items, status: 0 };
+  return { ok: true, items: items, status: 0, via: "direct" };
 }
 
 function applySearchedPlace(name, bdLat, bdLng) {
@@ -3400,19 +3939,96 @@ $("#rec-list").addEventListener("click", e => {
   // 编辑/补录操作
   openEditShift(idx, btn.dataset.type);
 });
-$("#export-data").addEventListener("click", () => {
-  const blob = new Blob([JSON.stringify(DB, null, 2)], { type: "application/json" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = "my-attendance-" + dateKey(new Date()) + ".json";
-  a.click();
-  URL.revokeObjectURL(url);
-  toast("数据已导出", "ok");
+$("#export-data").addEventListener("click", exportJSON);
+$("#export-csv").addEventListener("click", exportCSV);
+$("#import-data").addEventListener("click", () => { $("#import-file").click(); });
+$("#import-file").addEventListener("change", function() {
+  const f = this.files && this.files[0];
+  if (!f) return;
+  const reader = new FileReader();
+  reader.onload = function() {
+    try { importPreview(_importParse(String(reader.result))); }
+    catch (e) { toast("导入失败：" + (e && e.message ? e.message : e), "bad", 5000); }
+  };
+  reader.onerror = function() { toast("读取文件失败", "bad"); };
+  reader.readAsText(f, "utf-8");
+  this.value = "";
 });
-$("#reset-data").addEventListener("click", () => {
-  resetDB(); renderAll();
-  toast("已重置演示数据", "ok");
+$("#import-cancel").addEventListener("click", () => { _pendingImport = null; $("#dlg-import").classList.remove("show"); });
+$("#import-confirm").addEventListener("click", importMerge);
+$("#reset-data").addEventListener("click", async () => {
+  // F5：二次确认 + 先自动导出备份，再清空本机（云端数据不删除）
+  const ok = await customConfirm("清空本机数据",
+    "将清空本机全部打卡记录与设置（云端数据不会删除，重新同步可能恢复）。确认前会先自动导出一份 JSON 备份。", "清空");
+  if (!ok) return;
+  exportJSON();
+  resetDB();
+  DB.dayConfigMap = {};
+  DB.weekdayRules = {};
+  saveDB();
+  renderAll();
+  toast("本机数据已清空（云端数据未清除）", "ok", 4500);
+});
+
+// ---- v3 设置项事件 ----
+$("#bill-shift").addEventListener("click", () => applyBillMode("shift"));
+$("#bill-actual").addEventListener("click", () => applyBillMode("actual"));
+$("#edit-weekday").addEventListener("click", () => { renderWeekdayList(); $("#dlg-weekday").classList.add("show"); });
+$("#wd-cancel").addEventListener("click", () => $("#dlg-weekday").classList.remove("show"));
+$("#wd-save").addEventListener("click", saveWeekdayRules);
+$("#open-shift-editor").addEventListener("click", () => openShiftEditor(dateKey(new Date())));
+$("#se-cancel").addEventListener("click", () => $("#dlg-shift-editor").classList.remove("show"));
+$("#se-save").addEventListener("click", saveShiftEditor);
+$("#se-date").addEventListener("change", function() {
+  if (!this.value) return;
+  const cfg = dayConfigOf(this.value);
+  $("#se-start").value = cfg.start || "09:00";
+  $("#se-end").value = cfg.end || "18:00";
+  $("#se-break").value = cfg.breakMin != null ? cfg.breakMin : 30;
+  $("#se-mode").value = cfg.mode || "shift";
+  $("#se-off").checked = !!cfg.off;
+  const hasSnap = !!(DB.dayConfigMap && DB.dayConfigMap[this.value]);
+  $("#shift-src-hint").textContent = "该日配置来源：" + (hasSnap ? "按日覆盖/历史快照" : "默认/周几规则（实时）") + "；保存后写入 dayConfigMap，只影响该日期";
+});
+$("#btn-ledger").addEventListener("click", () => {
+  const el = $("#ledger-month");
+  if (el && !el.value) el.value = dateKey(new Date()).slice(0, 7);
+  renderLedger();
+  $("#dlg-ledger").classList.add("show");
+});
+$("#ledger-refresh").addEventListener("click", () => renderLedger());
+$("#ledger-close").addEventListener("click", () => $("#dlg-ledger").classList.remove("show"));
+$("#ledger-list").addEventListener("click", function(e) {
+  const coord = e.target.closest("[data-lat]");
+  if (coord && coord.dataset.lat && coord.dataset.lng) {
+    openBMap(Number(coord.dataset.lat), Number(coord.dataset.lng), "打卡坐标", "");
+    return;
+  }
+  const restore = e.target.closest("[data-restore]");
+  if (restore && restore.dataset.restore) {
+    const rec = (DB.records || []).find(function(r) { return r.id === restore.dataset.restore; });
+    if (rec) {
+      rec.deleted = false;
+      rec.updatedAt = Date.now();
+      saveDB(); renderAll(); renderLedger();
+      toast("记录已恢复", "ok");
+    }
+  }
+});
+$("#demo-sim").addEventListener("click", () => {
+  if (locMode === "sim") { stopLoc(); toast("已停止演示定位", "ok"); return; }
+  startSim();
+  toast("演示模式：模拟定位中（记录会标记 sim）", "warn", 4000);
+});
+document.addEventListener("visibilitychange", function() {
+  if (document.hidden) return;
+  // T7.4：回前台对账——从原生库合并后台产生的打卡，再跑一次异常提醒
+  try {
+    if (getNativePlugin() && getNativePlugin().sqliteLoad) {
+      loadFromSQLite().then(function() { renderAll(); }).catch(function() {});
+    }
+  } catch (e) { Logger.error("visibilitychange reconcile:", e); }
+  showAnomalyWarnings();
 });
 $("#save-ai-key").addEventListener("click", () => {
   const key = $("#ai-api-key").value.trim();
@@ -3660,13 +4276,16 @@ setInterval(() => {
     }
   } catch (e) { Logger.error("start pollCheckIn:", e); }
   try { renderAll(); } catch (e) { Logger.error("renderAll:", e); }
+  // v3：启动定时提醒（上班前15分钟 / 到点未签退）与版本检查
+  try { scheduleTimeReminders(); } catch (e) { Logger.error("scheduleTimeReminders:", e); }
+  try { checkAppVersion(); } catch (e) { Logger.error("checkAppVersion:", e); }
   try { updateStorageWarning(); } catch (e) {}
   try {
     if (!bmap) { drawMap(); }
   } catch (e) { Logger.error("drawMap initial:", e); }
 
-  // Service Worker 注册（仅浏览器环境；APK WebView 中静默失败）
-  if ("serviceWorker" in navigator) {
+  // Service Worker 注册（仅浏览器环境；Capacitor WebView 内注册会导致发版后前端卡在旧缓存）
+  if (!window.Capacitor && "serviceWorker" in navigator) {
     navigator.serviceWorker.register("sw.js").catch(() => {});
   }
   // 初始化 AI 聊天助手（延迟到 DOM 就绪后，因为 aiBall 元素在脚本之后）
@@ -3748,35 +4367,38 @@ setInterval(() => {
             }
           } catch (e) { Logger.error("maybePromptEarlyLeave:", e); }
         };
-        window.showEarlyLeaveDialog = function() {
+        window.showEarlyLeaveDialog = async function() {
           try {
             const raw = localStorage.getItem("pending_early_leave");
             if (!raw) return;
             const info = JSON.parse(raw);
             localStorage.removeItem("pending_early_leave");
             const outStr = fmtTime(info.outTs), setStr = fmtTime(info.setEnd);
-            const isEarly = confirm("今天 " + outStr + " 离开工地，早于设置下班时间 " + setStr + "。\n\n是否早退？\n【确定】= 早退，自行修改当天下班时间\n【取消】= 未早退，保持 " + setStr + " 不变");
-            if (isEarly) {
-              // v111fix7：用户自定义修改当天下班时间（默认填实际离开时间，可自行改成任意时间）
-              let newEnd = prompt("请输入当天下班时间（24小时制 HH:mm）", outStr);
-              if (newEnd === null) { toast("未修改，仍按设置时间 " + setStr + " 记录", "warn", 4000); return; }
-              newEnd = String(newEnd).trim();
-              if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(newEnd)) { toast("时间格式不对（应为 HH:mm，如 18:30），未修改", "warn", 5000); return; }
-              DB.dailyEndTimeMap = DB.dailyEndTimeMap || {};
-              DB.dailyEndTimeMap[info.dk] = newEnd;
-              saveDB();
-              renderAll();
-              toast("当天下班时间已改为 " + newEnd + "，工时已重新计算", "ok", 6000);
-              // 通知云同步把改动后的按日班次设置同步出去
-              try {
-                if (window.CloudSync && window.CloudSync.markSettingsDirty) {
-                  window.CloudSync.markSettingsDirty();
-                  window.CloudSync.syncSettingsToCloud();
-                }
-              } catch (se) { Logger.error("earlyLeave sync:", se); }
-            } else {
-              toast("已按设置下班时间 " + setStr + " 记录", "ok", 4000);
-            }
+            // T7.11#11：自绘弹层替代系统 confirm/prompt
+            const isEarly = await customConfirm("检测到早退",
+              "今天 " + outStr + " 离开工地，早于设置下班时间 " + setStr + "。是否按早退处理（修改当天账面下班时间）？",
+              "是，改下班时间");
+            if (!isEarly) { toast("保持设置下班时间 " + setStr, "ok", 4000); return; }
+            const newEnd = await customPrompt("修改当天账面下班时间", "请输入 HH:mm（默认 " + outStr + "）", outStr);
+            if (newEnd === null) { toast("未修改，仍按设置时间 " + setStr + " 记录", "warn", 4000); return; }
+            const v = String(newEnd).trim();
+            if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(v)) { toast("时间格式不对（应为 HH:mm），未修改", "warn", 5000); return; }
+            DB.dayConfigMap = DB.dayConfigMap || {};
+            const baseCfg = dayConfigOf(info.dk);
+            DB.dayConfigMap[info.dk] = Object.assign({}, baseCfg, {
+              end: v,
+              frozen: info.dk < dateKey(new Date())
+            });
+            if (!saveDB()) { toast("保存失败", "bad"); return; }
+            syncNativeSettings();
+            renderAll();
+            toast("已把 " + info.dk + " 的账面下班改为 " + v + "，工时已重算", "ok", 6000);
+            try {
+              if (window.CloudSync && window.CloudSync.markSettingsDirty) {
+                window.CloudSync.markSettingsDirty();
+                window.CloudSync.syncSettingsToCloud();
+              }
+            } catch (se) { Logger.error("earlyLeave sync:", se); }
           } catch (e) { Logger.error("showEarlyLeaveDialog:", e); }
         };
         // App 从后台回到前台：有待确认的早退提示则弹出
@@ -3803,8 +4425,8 @@ setInterval(() => {
             }, 5000);
           }
         } catch (e) { Logger.error("bg loc guide:", e); }
-        // 同时启动 VPN 保活（仅在自动模式下）
-        if (DB.vpnKeepAlive !== "manual" && window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.WorkTimePlugin) {
+        // 同时启动 VPN 保活（仅在用户显式选了自动模式时）
+        if (DB.vpnKeepAlive === "auto" && window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.WorkTimePlugin) {
           window.Capacitor.Plugins.WorkTimePlugin.startVpnService().then(() => {
             Logger.debug("VPN service started");
           }).catch(e => Logger.error("VPN start error:", e));
@@ -3858,56 +4480,47 @@ function initAIChat() {
 
   function getLocalContext() {
     try {
-      let recs = DB && DB.records ? DB.records : [];
-      let todayKey = dateKey(new Date());
-      let today = recs.filter(function(r) { return dateKey(new Date(r.time)) === todayKey; });
-      let todayMins = today.reduce(function(s, r) {
-        if (r.type === "out" && r.inRecord) {
-          let d1 = new Date(r.time), d2 = new Date(r.inRecord.time);
-          return s + Math.max(0, (d1 - d2) / 60000);
-        }
-        return s;
-      }, 0);
-      let todayOut = today.filter(function(r) { return r.type === "out"; }).length;
-      let todayIn = today.filter(function(r) { return r.type === "in"; }).length;
-      let weekMins = 0;
-      let sortedDays = [];
-      try {
-        let daysMap = {};
-        recs.forEach(function(r) {
-          let dk = dateKey(new Date(r.time));
-          daysMap[dk] = true;
-        });
-        sortedDays = Object.keys(daysMap).sort().reverse();
-      } catch(e) {}
-      let weekCount = Math.min(7, sortedDays.length);
-      for (let wi = 0; wi < weekCount; wi++) {
-        let day = sortedDays[wi];
-        let dayRecs = recs.filter(function(r) { return dateKey(new Date(r.time)) === day; });
-        weekMins += dayRecs.reduce(function(s, r) {
-          if (r.type === "out" && r.inRecord) {
-            let d1 = new Date(r.time), d2 = new Date(r.inRecord.time);
-            return s + Math.max(0, (d1 - d2) / 60000);
-          }
-          return s;
-        }, 0);
+      // T7.11#2/#5：过滤软删除；工时统计与页面同口径（computeShifts + 当日配置）
+      const recs = (DB && DB.records ? DB.records : []).filter(function(r) { return !r.deleted; });
+      const todayDk = dateKey(new Date());
+      const cfg = dayConfigOf(todayDk);
+      const rateVal = (cfg.rate != null ? cfg.rate : DB.payRate) || 0;
+      const dayMinsOf = function(dk) {
+        const sh = computeShifts(DB.records, dayStartTs(parseDateKey(dk)), dayEndTs(parseDateKey(dk)), getDailyBreakMinutes(DB, dk));
+        return sh.reduce(function(s, x) { return s + x.minutes; }, 0);
+      };
+      const todayMins = dayMinsOf(todayDk);
+      const days = [...new Set(recs.map(function(r) { return r.dateKey || dateKey(new Date(r.time)); }))].sort().reverse();
+      const weekCount = Math.min(7, days.length);
+      let weekMins = 0, weekIncome = 0;
+      for (let i = 0; i < weekCount; i++) {
+        const dk = days[i];
+        const c = dayConfigOf(dk);
+        const m = dayMinsOf(dk);
+        weekMins += m;
+        weekIncome += (m / 60) * ((c.rate != null ? c.rate : DB.payRate) || 0);
       }
-      let pay = (DB && DB.payRate) || 0;
-      let setHours = (DB && DB.dailyHours) || 8;
-      let workPlace = (DB && DB.workPlace) || null;
+      let streak = 0;
+      for (let i = 0; i < days.length; i++) {
+        const has = recs.some(function(r) { return (r.dateKey || dateKey(new Date(r.time))) === days[i] && r.type === "in"; });
+        if (has) streak++; else break;
+      }
+      const workPlace = (DB && DB.workPlace) || null;
       return {
         todayMinutes: Math.round(todayMins),
         todayHours: (todayMins / 60).toFixed(1),
-        todayIncome: (todayMins / 60 * pay).toFixed(1),
-        todayPunches: todayIn,
-        todayOuts: todayOut,
+        todayIncome: ((todayMins / 60) * rateVal).toFixed(1),
+        todayPunches: recs.filter(function(r) { return (r.dateKey || "") === todayDk && r.type === "in"; }).length,
+        todayOuts: recs.filter(function(r) { return (r.dateKey || "") === todayDk && r.type === "out"; }).length,
         weekMinutes: Math.round(weekMins),
         weekHours: (weekMins / 60).toFixed(1),
-        weekIncome: (weekMins / 60 * pay).toFixed(1),
-        hourlyPay: pay,
-        dailyTargetHours: setHours,
+        weekIncome: weekIncome.toFixed(1),
+        hourlyPay: rateVal,
+        dailyTargetHours: (getDailyTargetMinutes(DB, todayDk) / 60).toFixed(1),
         totalRecords: recs.length,
-        location: workPlace && workPlace.lat ? (workPlace.lat.toFixed(4) + "," + workPlace.lng.toFixed(4)) : "未设置"
+        streakDays: streak,
+        offToday: !!cfg.off,
+        location: workPlace && workPlace.lat ? (Number(workPlace.lat).toFixed(2) + "," + Number(workPlace.lng).toFixed(2)) : "未设置"
       };
     } catch (e) { return {}; }
   }
@@ -3920,8 +4533,9 @@ function initAIChat() {
       "- 今天已工作：" + (ctx.todayHours || 0) + " 小时（" + (ctx.todayMinutes || 0) + " 分钟），收入约 " + (ctx.todayIncome || 0) + " 元\n" +
       "- 今天打卡：" + (ctx.todayPunches || 0) + " 次签到，" + (ctx.todayOuts || 0) + " 次签退\n" +
       "- 近7天已工作：" + (ctx.weekHours || 0) + " 小时，收入约 " + (ctx.weekIncome || 0) + " 元\n" +
-      "- 历史总记录数：" + (ctx.totalRecords || 0) + " 条\n" +
-      "工作地点坐标：" + (ctx.location || "未设置") + "\n\n" +
+      "- 历史总记录数：" + (ctx.totalRecords || 0) + " 条；连续工作 " + (ctx.streakDays || 0) + " 天\n" +
+      "- 今天是休息日：" + (ctx.offToday ? "是" : "否") + "\n" +
+      "工作地点坐标（约）：" + (ctx.location || "未设置") + "\n\n" +
       "请用简洁友好的中文回答用户关于工时、收入、打卡、工作安排的问题。如果用户询问数据，优先使用上述本地数据直接回答。";
   }
 
@@ -4479,7 +5093,9 @@ function initAIChat() {
     markSettingsDirty: function() { _settingsDirty = true; },
     bidirectionalSync: bidirectionalSync,
     renderCloudBindStatus: renderCloudBindStatus,
-    checkBindStatus: checkBindStatus
+    checkBindStatus: checkBindStatus,
+    // T6.2：暴露 cloudCall 给 Place 检索等场景复用（匿名登录态 + 云函数）
+    cloudCall: cloudCall
   };
 }
 

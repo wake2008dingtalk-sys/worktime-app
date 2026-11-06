@@ -321,7 +321,12 @@ jobs:
                           Log.i(TAG, "onStartCommand");
                           SharedPreferences sp = getSharedPreferences("worktime_prefs", MODE_PRIVATE);
                           pollIntervalMs = sp.getInt("poll_interval_ms", 30000);
-                          startForeground(NOTIF_ID, NotificationHelper.buildForeground(this, "WorkTime 后台运行中", "定位监控与自动签到服务"));
+                          try {
+                              startForeground(NOTIF_ID, NotificationHelper.buildForeground(this, "WorkTime 后台运行中", "定位监控与自动签到服务"));
+                          } catch (Exception e) {
+                              // v110: Android 14+ 后台启动 FGS 受限时可能抛 ForegroundServiceStartNotAllowedException / SecurityException
+                              Log.e(TAG, "startForeground failed: " + e.getMessage());
+                          }
                           startPolling();
                           scheduleAlarm();
                           return START_STICKY;
@@ -386,10 +391,12 @@ jobs:
                                    long endMs = dayStart + endMin * 60000L;
                                    long inWinStart = startMs - 3600000L;   // 上班前 1 小时起可签
                                    long inWinEnd = startMs + 4 * 3600000L; // 上班后 4 小时内可签
+                                   // v110: 休息日（T5.3）：off_day=true 时签到时间门限视为全天开放，签退逻辑保持
+                                   boolean offDay = sp.getBoolean("off_day", false);
                                    Log.i(TAG, "Check: inside=" + inside + " onDuty=" + onDuty + " lastSign=" + lastSign
-                                       + " inWin=[" + inWinStart + "," + inWinEnd + "] now=" + nowMs + " endMs=" + endMs);
+                                       + " inWin=[" + inWinStart + "," + inWinEnd + "] now=" + nowMs + " endMs=" + endMs + " offDay=" + offDay);
                                    if (autoCheckIn && inside && !onDuty && !"in".equals(lastSign)
-                                       && nowMs >= inWinStart && nowMs <= inWinEnd) {
+                                       && (offDay || (nowMs >= inWinStart && nowMs <= inWinEnd))) {
                                        sign("in", nowMs, lat, lng, acc);
                                    } else if (autoCheckIn && !inside && onDuty && "in".equals(lastSign) && nowMs >= endMs) {
                                        // v108: 防 GPS 漂移误签退——连续 2 次定位都在围栏外才确认签退
@@ -467,27 +474,52 @@ jobs:
                       }
                        private void scheduleAlarm() {
                            AlarmManager am = (AlarmManager) getSystemService(Context.ALARM_SERVICE);
+                           if (am == null) { Log.w(TAG, "AlarmManager unavailable, skip scheduling"); return; }
                            Intent intent = new Intent(this, AlarmReceiver.class);
                            PendingIntent pi = PendingIntent.getBroadcast(this, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
                            // v108: 闹钟间隔与轮询间隔一致（至少 60s），避免不必要的硬唤醒耗电
                            long interval = Math.max(pollIntervalMs, 60000);
-                           long triggerAt = SystemClock.elapsedRealtime() + interval;
-                           try {
-                               // Use setAlarmClock for better Doze/Standby compatibility
-                               // This also shows an alarm icon in status bar
-                               AlarmManager.AlarmClockInfo alarmInfo = new AlarmManager.AlarmClockInfo(triggerAt, pi);
-                               am.setAlarmClock(alarmInfo, pi);
-                               Log.i(TAG, "Alarm scheduled via setAlarmClock, interval=" + interval);
-                           } catch (Exception e) {
-                               // Fallback for older devices
-                               if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                                   am.setExactAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, triggerAt, pi);
-                               } else {
-                                   am.setRepeating(AlarmManager.ELAPSED_REALTIME_WAKEUP, triggerAt, interval, pi);
-                               }
-                               Log.i(TAG, "Alarm scheduled via fallback");
+                           long elapsedTriggerAt = SystemClock.elapsedRealtime() + interval;
+                           // v110: Android 14 (targetSdk 34) 默认不授予 SCHEDULE_EXACT_ALARM，
+                           // 未授权时必须降级为非精确闹钟；任何异常都不允许从 Service 生命周期里冒泡。
+                           boolean exactAllowed = true;
+                           if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                               exactAllowed = am.canScheduleExactAlarms();
                            }
-                        }
+                           if (exactAllowed) {
+                               try {
+                                   // 时钟域修正：AlarmClockInfo 必须使用 wall-clock（RTC）时间戳；
+                                   // 旧代码用 elapsedRealtime() 会得到 1970 年附近的过去时间，导致闹钟立即触发。
+                                   long wallTriggerAt = System.currentTimeMillis() + interval;
+                                   AlarmManager.AlarmClockInfo alarmInfo = new AlarmManager.AlarmClockInfo(wallTriggerAt, pi);
+                                   am.setAlarmClock(alarmInfo, pi);
+                                   Log.i(TAG, "Alarm scheduled via setAlarmClock, interval=" + interval);
+                                   return;
+                               } catch (Exception e) {
+                                   Log.w(TAG, "setAlarmClock failed, fallback to exact: " + e.getMessage());
+                               }
+                               try {
+                                   if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                                       am.setExactAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, elapsedTriggerAt, pi);
+                                   } else {
+                                       am.setRepeating(AlarmManager.ELAPSED_REALTIME_WAKEUP, elapsedTriggerAt, interval, pi);
+                                   }
+                                   Log.i(TAG, "Alarm scheduled via setExactAndAllowWhileIdle, interval=" + interval);
+                                   return;
+                               } catch (Exception e) {
+                                   Log.w(TAG, "exact alarm failed, fallback to inexact: " + e.getMessage());
+                               }
+                           } else {
+                               Log.w(TAG, "exact alarm not permitted, fallback to inexact");
+                           }
+                           try {
+                               // 非精确降级：可能被系统延后，但不崩溃、不中断保活链
+                               am.set(AlarmManager.ELAPSED_REALTIME_WAKEUP, elapsedTriggerAt, pi);
+                               Log.i(TAG, "Alarm scheduled via inexact set(), interval=" + interval);
+                           } catch (Exception e) {
+                               Log.e(TAG, "scheduleAlarm failed completely: " + e.getMessage());
+                           }
+                       }
                         @Override public IBinder onBind(Intent intent) { return null; }
                         @Override public void onDestroy() {
                            super.onDestroy();
@@ -539,18 +571,47 @@ jobs:
                            android.content.SharedPreferences sp = ctx.getSharedPreferences("worktime_prefs", Context.MODE_PRIVATE);
                            long interval = Math.max(sp.getInt("poll_interval_ms", 300000), 60000);
                            long nextTrigger = SystemClock.elapsedRealtime() + interval;
-                           if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                               am.setExactAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, nextTrigger, pi);
-                           } else {
-                               am.setRepeating(AlarmManager.ELAPSED_REALTIME_WAKEUP, nextTrigger, interval, pi);
+                           // v110: 精确闹钟未授权（Android 14 默认不授予 SCHEDULE_EXACT_ALARM）时降级为非精确闹钟；
+                           // 任何异常都不能从 BroadcastReceiver 主线程冒出，否则直接崩溃。
+                           boolean exactAllowed = true;
+                           if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                               exactAllowed = am != null && am.canScheduleExactAlarms();
                            }
-                           Log.i(TAG, "Next alarm scheduled, interval=" + interval);
+                           boolean scheduled = false;
+                           if (exactAllowed && am != null) {
+                               try {
+                                   if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                                       am.setExactAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, nextTrigger, pi);
+                                   } else {
+                                       am.setRepeating(AlarmManager.ELAPSED_REALTIME_WAKEUP, nextTrigger, interval, pi);
+                                   }
+                                   scheduled = true;
+                                   Log.i(TAG, "Next alarm scheduled, interval=" + interval);
+                               } catch (Exception e) {
+                                   Log.w(TAG, "exact alarm failed, fallback to inexact: " + e.getMessage());
+                               }
+                           } else if (am != null) {
+                               Log.w(TAG, "exact alarm not permitted, fallback to inexact");
+                           }
+                           if (!scheduled && am != null) {
+                               try {
+                                   am.set(AlarmManager.ELAPSED_REALTIME_WAKEUP, nextTrigger, pi);
+                                   Log.i(TAG, "Next alarm scheduled via inexact set(), interval=" + interval);
+                               } catch (Exception e) {
+                                   Log.e(TAG, "reschedule alarm failed: " + e.getMessage());
+                               }
+                           }
                            // 启动服务
                            Intent svc = new Intent(ctx, WorkTimeService.class);
-                           if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                               ctx.startForegroundService(svc);
-                           } else {
-                               ctx.startService(svc);
+                           try {
+                               if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                                   ctx.startForegroundService(svc);
+                               } else {
+                                   ctx.startService(svc);
+                               }
+                           } catch (Exception e) {
+                               // v110: Android 14+ 后台启动 FGS 可能抛 ForegroundServiceStartNotAllowedException / SecurityException
+                               Log.e(TAG, "start service from alarm failed: " + e.getMessage());
                            }
                        }
                    }
@@ -570,10 +631,15 @@ jobs:
                           if (Intent.ACTION_BOOT_COMPLETED.equals(intent.getAction())) {
                               Log.i(TAG, "Boot completed, starting service");
                               Intent svc = new Intent(ctx, WorkTimeService.class);
-                              if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                                  ctx.startForegroundService(svc);
-                              } else {
-                                  ctx.startService(svc);
+                              try {
+                                  if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                                      ctx.startForegroundService(svc);
+                                  } else {
+                                      ctx.startService(svc);
+                                  }
+                              } catch (Exception e) {
+                                  // v110: Android 14+ 后台启动 FGS 可能抛 ForegroundServiceStartNotAllowedException / SecurityException
+                                  Log.e(TAG, "start service on boot failed: " + e.getMessage());
                               }
                           }
                       }
@@ -829,6 +895,8 @@ jobs:
                           // v108: 当日上下班时间（自零点分钟数）——服务侧每天自算时间窗，跨天不失效
                           if (data.has("startMinOfDay")) ed.putInt("start_min_of_day", data.optInt("startMinOfDay", 540));
                           if (data.has("endMinOfDay")) ed.putInt("end_min_of_day", data.optInt("endMinOfDay", 1080));
+                          // v110: 休息日（T5.3）off_day=true 时服务侧全天开放签到时间窗，前端 syncSettings 传入 offDay
+                          if (data.has("offDay")) ed.putBoolean("off_day", data.optBoolean("offDay", false));
                           ed.apply();
                           call.resolve();
                       }
@@ -1368,7 +1436,6 @@ jobs:
               '    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />',
               '    <uses-permission android:name="android.permission.WAKE_LOCK" />',
               '    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />',
-              '    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />',
               '    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />',
               # v1.0.1 上架合规：SYSTEM_ALERT_WINDOW（悬浮窗）代码中从未使用，
               # 但属于商店重点审查的敏感权限，移除以降低驳回风险。
@@ -1391,6 +1458,50 @@ jobs:
               print('Added services')
           else:
               print('Services already present')
+
+          # 10. T1.1 上架合规：关闭应用数据备份，并生成 Android 12+ 备份排除规则
+          def _set_manifest_attr(text, attr, value):
+              pattern = re.compile(re.escape(attr) + r'\s*=\s*"[^"]*"')
+              if pattern.search(text):
+                  return pattern.sub(re.escape(attr) + '="' + value + '"', text, count=1), 'replaced'
+              tag = re.search(r'<application\b', text)
+              if not tag:
+                  return text, 'application tag not found'
+              return text[:tag.end()] + '\n        ' + attr + '="' + value + '"' + text[tag.end():], 'added'
+
+          # 目标：android:allowBackup="false" + android:fullBackupContent="false"
+          #       + android:dataExtractionRules="@xml/data_extraction_rules"
+          for _attr in [
+              'android:allowBackup="false"',
+              'android:fullBackupContent="false"',
+              'android:dataExtractionRules="@xml/data_extraction_rules"',
+          ]:
+              _name, _value = _attr.split('=', 1)
+              m, _how = _set_manifest_attr(m, _name, _value.strip('"'))
+              print('manifest ' + _attr + ' -> ' + _how)
+
+          xml_dir = 'android/app/src/main/res/xml'
+          os.makedirs(xml_dir, exist_ok=True)
+          backup_rules = '\n'.join([
+              '<?xml version="1.0" encoding="utf-8"?>',
+              '<data-extraction-rules>',
+              '    <cloud-backup>',
+              '        <exclude domain="database" path="worktime.db" />',
+              '        <exclude domain="database" path="." />',
+              '        <exclude domain="file" path="." />',
+              '        <exclude domain="sharedpref" path="." />',
+              '    </cloud-backup>',
+              '    <device-transfer>',
+              '        <exclude domain="database" path="worktime.db" />',
+              '        <exclude domain="database" path="." />',
+              '        <exclude domain="file" path="." />',
+              '        <exclude domain="sharedpref" path="." />',
+              '    </device-transfer>',
+              '</data-extraction-rules>',
+          ]) + '\n'
+          with open(os.path.join(xml_dir, 'data_extraction_rules.xml'), 'w') as f:
+              f.write(backup_rules)
+          print('Wrote res/xml/data_extraction_rules.xml')
 
           with open(manifest, 'w') as f:
               f.write(m)
@@ -1441,11 +1552,11 @@ jobs:
             print("WARNING: MainActivity.java not found")
           PYEOF
 
-      - name: Set app version and SDK levels (v1.0.1 上架版)
+      - name: Set app version and SDK levels (v1.1.0 上架版)
         run: |
           # 应用商店要求：targetSdkVersion >= 34，版本号随每次上架递增。
-          VERSION_CODE="${{ vars.RELEASE_VERSION_CODE || 2 }}"
-          VERSION_NAME="${{ vars.RELEASE_VERSION_NAME || '1.0.1' }}"
+          VERSION_CODE="${{ vars.RELEASE_VERSION_CODE || github.run_number }}"
+          VERSION_NAME="${{ vars.RELEASE_VERSION_NAME || '1.1.0' }}"
           GRADLE="android/app/build.gradle"
           if [ -f "$GRADLE" ]; then
             if grep -q "versionCode" "$GRADLE"; then
@@ -1461,9 +1572,46 @@ jobs:
           if [ -f "$VARS" ]; then
             sed -i "s/compileSdkVersion = [0-9]*/compileSdkVersion = 34/" "$VARS"
             sed -i "s/targetSdkVersion = [0-9]*/targetSdkVersion = 34/" "$VARS"
+            # T7.6: minSdk 22 -> 24（compile/target 保持 34 不变）
+            sed -i "s/minSdkVersion = [0-9]*/minSdkVersion = 24/" "$VARS"
             echo "---- SDK 配置 ----"
             grep -n "SdkVersion" "$VARS"
           fi
+
+      - name: Configure ABI filters (T1.2)
+        run: |
+          python3 - <<'PYEOF'
+          import os
+
+          # T1.2: 只打包 arm64-v8a / armeabi-v7a，裁剪其余 ABI（APK 体积约降 8-9MB）
+          gradle = 'android/app/build.gradle'
+          abi_block = '\n'.join([
+              '',
+              '        ndk {',
+              "            abiFilters 'arm64-v8a', 'armeabi-v7a'",
+              '        }',
+              '',
+          ])
+          if not os.path.exists(gradle):
+              print('WARNING: ' + gradle + ' not found, skip ABI filters')
+          else:
+              with open(gradle, 'r') as f:
+                  content = f.read()
+              if 'abiFilters' in content:
+                  print('ABI filters already present, skip')
+              else:
+                  default_cfg = content.find('defaultConfig')
+                  app_id = content.find('applicationId', default_cfg) if default_cfg >= 0 else -1
+                  if default_cfg >= 0 and app_id >= 0:
+                      line_end = content.find('\n', app_id)
+                      insert_at = line_end + 1 if line_end >= 0 else len(content)
+                      content = content[:insert_at] + abi_block + content[insert_at:]
+                      with open(gradle, 'w') as f:
+                          f.write(content)
+                      print('ABI filters inserted into defaultConfig: arm64-v8a, armeabi-v7a')
+                  else:
+                      print('WARNING: defaultConfig/applicationId not found, ABI filters NOT applied')
+          PYEOF
 
       - name: Sync and build
         env:
