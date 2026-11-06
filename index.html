@@ -108,6 +108,8 @@ main{padding:14px;max-width:720px;margin:0 auto;padding-bottom:80px}
 
 /* status */
 .status-bar{display:flex;align-items:center;gap:10px;margin-bottom:12px;font-size:13px;color:var(--dim)}
+.anomaly-box{margin:0 0 12px;padding:8px 10px;border-radius:10px;background:rgba(251,191,36,.10);border:1px solid rgba(251,191,36,.35)}
+.anomaly-item{font-size:12px;color:var(--warn);line-height:1.6}
 .status-chip{display:inline-flex;align-items:center;gap:6px}
 .status-chip i{width:8px;height:8px;border-radius:50%;background:var(--faint)}
 .status-chip.on i{background:var(--ok);box-shadow:0 0 8px var(--ok)}
@@ -443,6 +445,7 @@ main{padding:14px;max-width:720px;margin:0 auto;padding-bottom:80px}
         <div class="sub" id="ov-target">目标 8h</div>
   </div>
 </div>
+    <div class="anomaly-box" id="anomaly-box" style="display:none"></div>
 
 <!-- 按天设置每日上班时间弹窗 -->
 <div class="dlg-mask" id="dlg-start-daily">
@@ -883,55 +886,126 @@ function fmtClock(ts) {
   const d = new Date(ts);
   return `${fmtTime(ts)}:${String(d.getSeconds()).padStart(2, "0")}`;
 }
-function getTodayWorkTimes() {
-  const now = new Date();
-  const todayKey = dateKey(now);
-  const startStr = (DB.dailyStartTimeMap && DB.dailyStartTimeMap[todayKey] !== undefined)
-    ? DB.dailyStartTimeMap[todayKey] : (DB.dailyStartTime || "09:00");
-  const [sh, sm] = startStr.split(":").map(Number);
-  const startMs = dayStartTs(now) + sh * 3600000 + sm * 60000;
-  
-  // 优先使用下班时间计算工时
-  let endMs, endStr, hours;
-  const endTimeStr = (DB.dailyEndTimeMap && DB.dailyEndTimeMap[todayKey] !== undefined)
-    ? DB.dailyEndTimeMap[todayKey] : (DB.dailyEndTime || null);
-  
-  if (endTimeStr) {
-    const [eh, em] = endTimeStr.split(":").map(Number);
-    endMs = dayStartTs(now) + eh * 3600000 + em * 60000;
-    if (endMs < startMs) endMs += 86400000; // 跨夜班处理
-    hours = (endMs - startMs) / 3600000;
-    endStr = endTimeStr;
+/* ===================== 账面配置层 v3（dayConfigMap / 周几规则）===================== */
+// 设计依据：记录层只存"真实证据"（time/lat/lng/dist/source），账面时刻一律由配置推导，
+// 历史日通过 dayConfigMap 快照冻结（frozen），从此改默认值/调薪不会让历史账目漂移。
+function parseHM(s) {
+  if (s === null || s === undefined || s === "") return null;
+  const m = String(s).trim().match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) return null;
+  const h = parseInt(m[1], 10), mi = parseInt(m[2], 10);
+  if (h < 0 || h > 23 || mi < 0 || mi > 59) return null;
+  return h * 60 + mi;
+}
+function _cfgPick(obj, key, def) {
+  if (obj && obj[key] !== undefined && obj[key] !== null && obj[key] !== "") return obj[key];
+  return def;
+}
+// 实时解析某天的账面配置（不读写 dayConfigMap，仅按当前设置/周几规则推导）
+function _liveConfigFor(db, dk) {
+  db = db || DB;
+  dk = dk || dateKey(new Date());
+  const wd = parseDateKey(dk).getDay(); // 0=周日 … 6=周六
+  const rule = (db.weekdayRules && db.weekdayRules[wd]) || null;
+  const mapStart = db.dailyStartTimeMap || {};
+  const mapEnd = db.dailyEndTimeMap || {};
+  const mapBreak = db.dailyBreakMap || {};
+  const baseBreak = parseInt(db.dailyBreakMinutes);
+  return {
+    start: _cfgPick(mapStart, dk, (rule && rule.start != null) ? rule.start : (db.dailyStartTime || "09:00")),
+    end:   _cfgPick(mapEnd, dk, (rule && rule.end != null) ? rule.end : (db.dailyEndTime || null)),
+    breakMin: Math.max(0, parseInt(_cfgPick(mapBreak, dk,
+        (rule && rule.breakMin != null) ? rule.breakMin : (isNaN(baseBreak) ? 30 : baseBreak))) || 0),
+    rate: (rule && rule.rate != null) ? rule.rate : (db.payRate || 0),
+    mode: (rule && rule.mode) || db.billMode || "shift", // shift=按班次(默认) / actual=按实际时长
+    off: !!(rule && rule.off)
+  };
+}
+function liveConfig(dk) { return _liveConfigFor(DB, dk || dateKey(new Date())); }
+// 读取链：dayConfigMap 快照/按日覆盖 > 今天与未来实时配置 > 历史兜底实时配置
+function dayConfigOf(dk) {
+  dk = dk || dateKey(new Date());
+  if (DB.dayConfigMap && DB.dayConfigMap[dk]) return DB.dayConfigMap[dk];
+  if (dk >= dateKey(new Date())) return liveConfig(dk);
+  return liveConfig(dk);
+}
+// 由配置 + 日期推导绝对毫秒（含跨夜班处理）；end 缺失时回退 dailyHours
+function cfgTimesFor(dk, cfg) {
+  cfg = cfg || liveConfig(dk);
+  const base = parseDateKey(dk).getTime();
+  const startMin = parseHM(cfg.start);
+  const startMs = base + (startMin == null ? 540 : startMin) * 60000;
+  let endMs, setMin, endStr;
+  const endMin = parseHM(cfg.end);
+  if (endMin != null) {
+    endMs = base + endMin * 60000;
+    if (endMs < startMs) endMs += 86400000; // 跨夜班
+    setMin = (endMs - startMs) / 60000;
+    endStr = cfg.end;
   } else {
-    // 回退到 dailyHours 推算
-    hours = (DB.dailyHoursMap && DB.dailyHoursMap[todayKey] !== undefined)
-      ? DB.dailyHoursMap[todayKey] : (DB.dailyHours || 8);
-    endMs = startMs + hours * 3600000;
+    setMin = (parseFloat(DB.dailyHours) || 8) * 60;
+    endMs = startMs + setMin * 60000;
     endStr = fmtTime(endMs);
   }
-  return { startMs, endMs, startStr, endStr, hours };
+  return { startMs, endMs, setMin, startStr: cfg.start || fmtTime(startMs), endStr };
 }
-
-// v45: 设置时间修改后，自动校准当天所有签到记录的时间
-function calibrateRecords() {
-  const today = new Date();
-  const todayKey = dateKey(today);
-  const { startMs } = getTodayWorkTimes();
-  let changed = false;
-  DB.records.forEach(r => {
-    if (r.type === "in") {
-      const rDate = dateKey(new Date(r.time));
-      if (rDate === todayKey && r.time !== startMs) {
-        r.time = startMs;
-        changed = true;
-      }
-    }
+// 一次性迁移：把"有记录的历史日"固化为快照（只固化旧口径，不改写任何记录）
+function migrateToV3(db) {
+  db = db || DB;
+  if (!db || typeof db !== "object") return db;
+  db.dayConfigMap = db.dayConfigMap || {};
+  db.weekdayRules = db.weekdayRules || {};
+  const today = dateKey(new Date());
+  const days = [...new Set((db.records || []).filter(r => !r.deleted && r.dateKey).map(r => r.dateKey))];
+  days.forEach(dk => {
+    if (db.dayConfigMap[dk] || dk >= today) return; // 今天与未来走实时配置
+    const c = _liveConfigFor(db, dk);
+    db.dayConfigMap[dk] = {
+      start: c.start, end: c.end, breakMin: c.breakMin, rate: c.rate, mode: c.mode,
+      off: c.off, frozen: true, _legacy: true
+    };
   });
-  if (changed) {
-    saveDB();
-    renderAll();
-    toast("签到时间已根据新设置自动校准", "ok");
-  }
+  return db;
+}
+// 改默认值/调薪/改周几规则前：先把"今天之前的记录日"按当前生效值冻结，再应用新值
+function freezeHistory() {
+  const today = dateKey(new Date());
+  const days = [...new Set((DB.records || []).filter(r => !r.deleted && r.dateKey).map(r => r.dateKey))];
+  days.forEach(dk => {
+    if (dk >= today || DB.dayConfigMap[dk]) return;
+    const c = liveConfig(dk);
+    DB.dayConfigMap[dk] = {
+      start: c.start, end: c.end, breakMin: c.breakMin, rate: c.rate, mode: c.mode,
+      off: c.off, frozen: true
+    };
+  });
+}
+// 设置默认值的唯一入口（保存时薪/上下班/午休必须走这里，否则历史账目会漂移）
+function changeDefaults(patch) {
+  freezeHistory(); // 此时 patch 尚未应用，固化的是旧值
+  Object.assign(DB, patch || {});
+  if (!saveDB()) return false;
+  syncNativeSettings();
+  renderAll();
+  return true;
+}
+// 周几规则保存入口
+function changeWeekdayRules(rules) {
+  freezeHistory();
+  DB.weekdayRules = rules || {};
+  if (!saveDB()) return false;
+  syncNativeSettings();
+  renderAll();
+  return true;
+}
+function getTodayWorkTimes() {
+  const todayKey = dateKey(new Date());
+  const cfg = dayConfigOf(todayKey);
+  const t = cfgTimesFor(todayKey, cfg);
+  return {
+    startMs: t.startMs, endMs: t.endMs, startStr: t.startStr, endStr: t.endStr,
+    hours: (t.endMs - t.startMs) / 3600000, cfg: cfg
+  };
 }
 function notify(title, body) {
   // 优先使用 Capacitor 本地通知（在原生 APK 中弹出系统通知栏，类似微信通知）
@@ -979,26 +1053,14 @@ function fmtDurLong(min) {
   const h = Math.floor(min / 60), m = min % 60;
   return m ? h + "小时" + m + "分钟" : h + "小时";
 }
-// v107修复：按日期取上下班时间（历史日期不再误用"今天"的班次设置计算工时）
+// v3：按日期取账面配置（历史日优先 dayConfigMap 快照，今天/未来走实时配置）
 function getWorkTimesForDate(dayKey) {
-  const base = parseDateKey(dayKey);
-  const startStr = (DB.dailyStartTimeMap && DB.dailyStartTimeMap[dayKey] !== undefined)
-    ? DB.dailyStartTimeMap[dayKey] : (DB.dailyStartTime || "09:00");
-  const endTimeStr = (DB.dailyEndTimeMap && DB.dailyEndTimeMap[dayKey] !== undefined)
-    ? DB.dailyEndTimeMap[dayKey] : (DB.dailyEndTime || null);
-  const [sh, sm] = startStr.split(":").map(Number);
-  const startMs = base.getTime() + sh * 3600000 + sm * 60000;
-  let endMs, hours;
-  if (endTimeStr) {
-    const [eh, em] = endTimeStr.split(":").map(Number);
-    endMs = base.getTime() + eh * 3600000 + em * 60000;
-    if (endMs < startMs) endMs += 86400000;
-    hours = (endMs - startMs) / 3600000;
-  } else {
-    hours = (DB.dailyHoursMap && DB.dailyHoursMap[dayKey] !== undefined) ? DB.dailyHoursMap[dayKey] : (DB.dailyHours || 8);
-    endMs = startMs + hours * 3600000;
-  }
-  return { startMs, endMs, hours };
+  const cfg = dayConfigOf(dayKey);
+  const t = cfgTimesFor(dayKey, cfg);
+  return {
+    startMs: t.startMs, endMs: t.endMs, hours: (t.endMs - t.startMs) / 3600000,
+    startStr: t.startStr, endStr: t.endStr, cfg: cfg
+  };
 }
 // v107修复：存量记录迁移——补 id / dateKey / updatedAt（旧记录缺 dateKey 曾导致删除与云同步合并键永不命中）
 function migrateRecords(recs) {
@@ -1030,11 +1092,17 @@ function normalizeDB(d) {
   if (d.powerMode === undefined) d.powerMode = "standard";
   if (d.pollInterval === undefined) d.pollInterval = 30;
   if (d.payRate === undefined) d.payRate = 25;
-  if (d.vpnKeepAlive === undefined) d.vpnKeepAlive = "auto";
+  if (d.vpnKeepAlive === undefined) d.vpnKeepAlive = "manual"; // T6.3：VPN 保活默认关闭，用户设置里可改回自动
+  // v3 账面配置层默认值（旧数据自动升级）
+  if (!d.dayConfigMap || typeof d.dayConfigMap !== "object") d.dayConfigMap = {};
+  if (!d.weekdayRules || typeof d.weekdayRules !== "object") d.weekdayRules = {};
+  if (d.billMode === undefined) d.billMode = "shift";
   if (d.fence && !d.workPlace) { d.workPlace = { lat: d.fence.lat, lng:
       d.fence.lng }; delete d.fence; delete d.strict; }
   if (!d.workPlace) d.workPlace = { lat: 31.2988, lng: 120.5853, name: "苏州市" };
   if (d.workPlace && !d.workPlace.name) d.workPlace.name = "苏州市";
+  // v3：升级时给"有记录的历史日"固化账面快照（不改写任何记录）
+  migrateToV3(d);
   return d;
 }
 // v107修复：有效记录视图（过滤软删除墓碑）
@@ -1050,52 +1118,27 @@ function dayEndTs(d) {
   return dayStartTs(d) + 86400000;
 }
 function getDailyTargetMinutes(db, dayKey) {
-  // 先根据该日期的上下班设置时间计算基准目标工时
-  const startStr = (db.dailyStartTimeMap && db.dailyStartTimeMap[dayKey] !== undefined)
-    ? db.dailyStartTimeMap[dayKey] : (db.dailyStartTime || "09:00");
-  const [sh, sm] = startStr.split(":").map(Number);
-  const endTimeStr = (db.dailyEndTimeMap && db.dailyEndTimeMap[dayKey] !== undefined)
-    ? db.dailyEndTimeMap[dayKey] : (db.dailyEndTime || null);
-  let baseHours = 0;
-  if (endTimeStr) {
-    const [eh, em] = endTimeStr.split(":").map(Number);
-    baseHours = (eh * 60 + em - sh * 60 - sm) / 60;
-    if (baseHours < 0) baseHours += 24;
-  }
-  // 优先使用 dailyHoursMap，但需校验是否为污染数据
-  if (db.dailyHoursMap && db.dailyHoursMap[dayKey] !== undefined) {
-    const hours = db.dailyHoursMap[dayKey] || 0;
-    // 有效范围 0~24 且与上下班时间基准差异不超过 50%（防止旧版本污染数据）
-    const isValid = hours > 0 && hours <= 24;
-    const isNotPolluted = baseHours <= 0 || (hours >= baseHours * 0.5 && hours <= baseHours * 2);
-    if (isValid && isNotPolluted) {
-      return hours * 60;
-    }
-    // 污染数据（如 4.8167）忽略，继续回退计算
-  }
-  // 回退：使用上下班时间计算的基准工时
-  if (baseHours > 0) {
-    return baseHours * 60;
-  }
-  // 最终回退：全局 dailyHours
-  return (db.dailyHours || 8) * 60;
+  // v3：目标工时 = 账面班次时长 − 午休（与 computeShifts 封顶同源，进度可到 100%）；休息日为 0
+  const cfg = (db && db === DB) ? dayConfigOf(dayKey) : _liveConfigFor(db || DB, dayKey);
+  if (cfg.off) return 0;
+  const t = cfgTimesFor(dayKey, cfg);
+  return Math.max(0, Math.round(t.setMin - Math.max(0, parseInt(cfg.breakMin) || 0)));
 }
-function computeShifts(records, dayStart, dayEnd, breakMinutes) {
+function computeShifts(records, dayStart, dayEnd, breakMinutes, cfgOverride) {
   const dayKey = dateKey(new Date(dayStart + 86400000 / 2));
+  const cfg = cfgOverride || dayConfigOf(dayKey);
+  const t = cfgTimesFor(dayKey, cfg);
+  const setStartMs = t.startMs, setEndMs = t.endMs, setMin = t.setMin;
+  const breakMin = (breakMinutes !== undefined && breakMinutes !== null)
+    ? Math.max(0, parseInt(breakMinutes) || 0) : Math.max(0, parseInt(cfg.breakMin) || 0);
+  const targetMin = Math.max(0, Math.round(setMin - breakMin));
   // v107修复：过滤软删除记录；下班记录按序消费，避免多个上班配对同一个下班（双计工时）
-  // v111fix10：下班记录窗口扩至次日6小时——跨午夜班次（如22:00下班设06:00）的下班打卡落在次日，
-  // 此前按0点硬切导致夜班下半段丢失
+  // v111fix10：下班记录窗口扩至次日6小时——跨午夜班次的下班打卡落在次日
   const inRs = records.filter(r => !r.deleted && r.time >= dayStart && r.time < dayEnd && r.type === "in").sort((a,
       b) => a.time - b.time);
   const outRs = records.filter(r => !r.deleted && r.time >= dayStart && r.time < dayEnd + 6 * 3600000 && r.type === "out").sort((a,
       b) => a.time - b.time);
   const shifts = [];
-  // v111fix6（方案A）：设置班次时间提前取，配对班次的工时也一律按设置时间计算
-  const { startMs: setStartMs, endMs: setEndMs } = getWorkTimesForDate(dateKey(new Date(dayStart + 86400000 / 2)));
-  const setMin = Math.max(0, (setEndMs - setStartMs) / 60000);
-  // v111fix10：封顶值与统计页目标工时同源（getDailyTargetMinutes），
-  // 此前直接用 setMin-breakMinutes，在 dailyEndTime 缺失（按 dailyHours 推算）等场景与显示/目标口径不一致
-  const capMin = Math.min(setMin, getDailyTargetMinutes(DB, dateKey(new Date(dayStart + 86400000 / 2))));
   let outIdx = 0;
   inRs.forEach(rIn => {
     while (outIdx < outRs.length && outRs[outIdx].time <= rIn.time) outIdx++;
@@ -1103,34 +1146,39 @@ function computeShifts(records, dayStart, dayEnd, breakMinutes) {
     if (out) {
       outIdx++; // 消费该下班记录：同一天第二个上班不会再配到它
       const rawMin = Math.max(0, (out.time - rIn.time) / 60000);
-      const breakMin = breakMinutes || 0;
-      // 方案A：工时一律按设置时间（设置下班-设置上班-午休），早到/晚退均不增减
-      const minutes = Math.max(0, setMin - breakMin);
+      // shift=方案A（按设置班次，早到/晚退不增减）；actual=按实际时长（加班如实体现）
+      const minutes = cfg.mode === "actual"
+        ? Math.max(0, rawMin - breakMin)
+        : Math.max(0, setMin - breakMin);
       shifts.push({ in: rIn.time, out: out.time, minutes, rawMinutes: rawMin, breakMinutes: breakMin, distIn:
           rIn.dist || null, distOut: out.dist || null });
     }
   });
-  // 未配对的上班记录：用该日期的设置下班时间补全，且工时必须按设置上班时间计算
-  // v107修复：改用 getWorkTimesForDate(dayKey)——此前历史日期误用"今天"的班次设置
+  // 未配对的上班记录：shift 模式用设置下班时间补全；actual 模式算到 min(现在, 设置下班)
   const pairedIn = new Set(shifts.map(s => s.in));
+  const nowMs = Date.now();
   inRs.forEach(rIn => {
     if (!pairedIn.has(rIn.time)) {
-      const endOfDay = Math.min(setEndMs, dayEnd);
-      // 关键修复：工时按设置上班时间计算，而非实际打卡时间
-      const calcStart = Math.min(setStartMs, endOfDay);
-      const rawMin = Math.max(0, (endOfDay - calcStart) / 60000);
-      const breakMin = breakMinutes || 0;
-      const minutes = Math.max(0, rawMin - breakMin);
-      shifts.push({ in: rIn.time, out: endOfDay, minutes, rawMinutes: rawMin, breakMinutes: breakMin, distIn:
+      const softEnd = cfg.mode === "actual"
+        ? Math.min(setEndMs, dayEnd, Math.max(nowMs, rIn.time))
+        : Math.min(setEndMs, dayEnd);
+      let minutes, rawMin;
+      if (cfg.mode === "actual") {
+        rawMin = Math.max(0, (softEnd - rIn.time) / 60000);
+        minutes = Math.max(0, rawMin - breakMin);
+      } else {
+        const calcStart = Math.min(setStartMs, softEnd);
+        rawMin = Math.max(0, (softEnd - calcStart) / 60000);
+        minutes = Math.max(0, setMin - breakMin);
+      }
+      shifts.push({ in: rIn.time, out: softEnd, minutes, rawMinutes: rawMin, breakMinutes: breakMin, distIn:
           rIn.dist || null, distOut: null });
     }
   });
-  // v111fix9：每日工时封顶——方案A下每个班次都按设置算满，
-  // 同一天多个班次（补录/重复打卡）会导致工时翻倍；
-  // 封顶规则：全天各班次工时合计 ≤ 设置工时（设置班次时长-午休）
   const sorted = shifts.sort((a, b) => a.in - b.in);
-  const dayCap = Math.max(0, capMin - (breakMinutes || 0));
-  let remaining = dayCap;
+  // 每日封顶：shift 模式合计 ≤ 目标工时（防补录/重复打卡翻倍）；
+  // actual 模式只做 24h 合理性封顶，让加班如实体现
+  let remaining = cfg.mode === "actual" ? 24 * 60 : targetMin;
   sorted.forEach(s => {
     s.minutes = Math.min(s.minutes, Math.max(0, remaining));
     remaining -= s.minutes;
@@ -1138,10 +1186,8 @@ function computeShifts(records, dayStart, dayEnd, breakMinutes) {
   return sorted;
 }
 function getDailyBreakMinutes(db, dayKey) {
-  if (db.dailyBreakMap && db.dailyBreakMap[dayKey] !== undefined) {
-    return Math.max(0, parseInt(db.dailyBreakMap[dayKey]) || 0);
-  }
-  return Math.max(0, parseInt(db.dailyBreakMinutes) || 0);
+  const cfg = (db && db === DB) ? dayConfigOf(dayKey) : _liveConfigFor(db || DB, dayKey);
+  return Math.max(0, parseInt(cfg.breakMin) || 0);
 }
 function dayMinutes(records, dayStart, dayEnd) {
   const dayKey = dateKey(new Date(dayStart + 86400000 / 2));
@@ -1160,7 +1206,7 @@ function seedData() {
     payRate: 25,
     dailyHours: 8,
     dailyHoursMap: {},
-    vpnKeepAlive: "auto",
+    vpnKeepAlive: "manual",   // T6.3：VPN 保活默认关闭（设置页可改回自动）
     dailyStartTime: "09:00",
     dailyStartTimeMap: {},
     dailyEndTime: "18:00",
@@ -1170,6 +1216,10 @@ function seedData() {
     autoCheckIn: true,
     powerMode: "standard",   // "standard" | "low"
     pollInterval: 30,          // 轮询间隔（秒）
+    // v3 账面配置层
+    dayConfigMap: {},          // 历史日快照/按日显式覆盖
+    weekdayRules: {},          // 按周几的周期班次规则（0=周日…6=周六）
+    billMode: "shift",         // 计费模式：shift=按班次（默认） / actual=按实际时长
   };
 }
 
@@ -1363,7 +1413,9 @@ function settingsFingerprint() {
   return JSON.stringify([DB.workPlace, DB.payRate, DB.dailyHours, DB.dailyHoursMap, DB.dailyStartTime,
       DB.dailyStartTimeMap,
     DB.dailyEndTime, DB.dailyEndTimeMap, DB.dailyBreakMinutes, DB.dailyBreakMap, DB.autoCheckIn, DB.powerMode, DB.pollInterval,
-    DB.fenceRadius, DB.vpnKeepAlive]);
+    DB.fenceRadius, DB.vpnKeepAlive,
+    // v3：账面配置层参与指纹，保证 dayConfigMap/weekdayRules/billMode 变更会触发云同步与原生重同步
+    DB.billMode, DB.weekdayRules, DB.dayConfigMap]);
 }
 let DB = loadDB();
 _lastSettingsFp = settingsFingerprint();
@@ -1400,6 +1452,7 @@ function syncNativeSettings() {
   const dk = dateKey(new Date());
   const wt = getWorkTimesForDate(dk);
   const base = parseDateKey(dk).getTime();
+  const cfg = wt.cfg || liveConfig(dk);
   return P.syncSettings({
     workLat: DB.workPlace.lat,
     workLng: DB.workPlace.lng,
@@ -1407,7 +1460,8 @@ function syncNativeSettings() {
     startMinOfDay: Math.round((wt.startMs - base) / 60000),
     endMinOfDay: Math.round((wt.endMs - base) / 60000),
     autoCheckIn: DB.autoCheckIn !== false,
-    pollInterval: Math.max(DB.pollInterval || 300, 60) * 1000 // v108: 默认 5 分钟（原 30 秒 GPS 轮询耗电）
+    offDay: !!cfg.off, // v3：休息日让原生侧把签到时间门限视为全天开放
+    pollInterval: Math.max(DB.pollInterval || 30, 60) * 1000
   }).then(function() { Logger.debug("Settings synced to native"); })
     .catch(function(e) { Logger.error("syncNativeSettings:", e); });
 }
@@ -1421,7 +1475,9 @@ async function saveToSQLite() {
     const fields = ['workPlace','payRate','dailyHours','dailyHoursMap',
       'dailyStartTime','dailyStartTimeMap','dailyEndTime','dailyEndTimeMap',
       'dailyBreakMinutes','dailyBreakMap','autoCheckIn','powerMode',
-      'pollInterval','vpnKeepAlive','fenceRadius']; // v107修复：补 fenceRadius（此前不落库，恢复后围栏回退默认200米）
+      'pollInterval','vpnKeepAlive','fenceRadius',
+      // v3：账面配置层随设置持久化，云同步/原生往返不丢
+      'dayConfigMap','weekdayRules','billMode'];
     fields.forEach(function(f){ if (DB[f] !== undefined) settings[f] = DB[f]; });
     const res = await plugin.sqliteSave({
       settings: JSON.stringify(settings),
@@ -1548,31 +1604,30 @@ function loadDB() {
   try { localStorage.setItem(DB_KEY, JSON.stringify(seed)); } catch (e) {}
   return seed;
 }
-function addRecord(type, pos) {
-  // v45: 一天只签到一次，时间固定为设置的上班时间
-  const { startMs } = getTodayWorkTimes();
-  const recTime = startMs;
-  
-  // 如果当天已有上班记录，不再重复签到（v107修复：忽略软删除的记录）
-  const todayKey = dateKey(new Date());
-  const alreadySigned = DB.records.some(r => {
-    const rDate = dateKey(new Date(r.time));
-    return !r.deleted && r.type === "in" && rDate === todayKey;
-  });
-  if (alreadySigned) {
-    toast("今天已经签到过了", "warn");
+// v3：type 尊重参数（in/out）；time 写真实触发时刻；新增 dist 距工作点米数
+function addRecord(type, pos, source) {
+  const now = Date.now();
+  const todayKey = dateKey(new Date(now));
+  const recType = type === "out" ? "out" : "in";
+  // 防重复：同一天同类型只记一次（忽略软删除墓碑）
+  const already = DB.records.some(r => !r.deleted && r.type === recType &&
+      dateKey(new Date(r.time)) === todayKey);
+  if (already) {
+    toast(recType === "in" ? "今天已经签到过了" : "今天已经签退过了", "warn");
     return null;
   }
-
+  const distVal = (pos && isFinite(distToWork(pos))) ? Math.round(distToWork(pos)) : null;
   const rec = {
-    id: "r" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
-    type: "in", time: recTime,
-    dateKey: dateKey(new Date(recTime)), // v107修复：补 dateKey——此前缺失导致 deleteShift 找不到记录、云同步合并键永不命中
+    id: "r" + now.toString(36) + Math.random().toString(36).slice(2, 5),
+    type: recType,
+    time: now, // T3.3：真实触发时刻（旧记录保持原值，不做改写迁移）
+    dateKey: todayKey,
     lat: pos && pos.lat != null ? pos.lat : null,
     lng: pos && pos.lng != null ? pos.lng : null,
     acc: pos && pos.acc != null ? pos.acc : null,
-    source: "auto",
-    updatedAt: Date.now() // v107修复：增量同步游标（打卡 time 固定为上班时刻，不能作游标）
+    dist: distVal,
+    source: source || (locMode === "sim" ? "sim" : "auto"),
+    updatedAt: now
   };
   DB.records.push(rec);
   if (!saveDB()) {
@@ -1581,7 +1636,7 @@ function addRecord(type, pos) {
     toast("保存失败：数据无法写入存储。请尝试以下方法：1)重启APP 2)检查手机存储空间 3)使用导出功能备份", "bad", 5000);
     return null;
   }
-  // 触发云同步（v107修复：改用全局 CloudSync 接口——原 typeof 守卫引用闭包内函数恒为 undefined，同步从不触发）
+  // 触发云同步（v107修复：改用全局 CloudSync 接口）
   if (window.CloudSync && typeof window.CloudSync.onRecordChange === 'function') window.CloudSync.onRecordChange();
   return rec;
 }
@@ -1651,12 +1706,11 @@ function forceCheckoutIfDue() {
 }
 
 function checkFence(pos) {
-  // v45: checkFence 只处理上班自动签到，不再签退
   if (!pos) return;
   const nowIn = isInsideFence(pos);
   const now = new Date();
   const todayKey = dateKey(now);
-  const { startMs, startStr } = getTodayWorkTimes();
+  const { startMs, startStr, cfg } = getTodayWorkTimes();
   const nowMs = now.getTime();
 
   // 跨天重置围栏状态
@@ -1666,97 +1720,35 @@ function checkFence(pos) {
 
   // === 上班自动签到：在围栏内 + 已到上班时间 + 当天未签到 ===
   if (nowIn) {
-    if (fenceState.inside === true) {
-      fenceState.count++;
-    } else {
-      fenceState.inside = true;
-      fenceState.count = 1;
-    }
-    // 连续1次确认在围栏内即触发签到
-    if (DB.autoCheckIn && fenceState.count >= 1 && fenceState.lastSign !== "in") {
-      if (nowMs >= startMs) {
-        const rec = addRecord("in", pos);
+    fenceState.count = fenceState.inside === true ? fenceState.count + 1 : 1;
+    fenceState.inside = true;
+    // T7.2：连续 2 次确认在围栏内才触发签到，避免 GPS 漂移误打卡
+    if (DB.autoCheckIn && fenceState.count >= 2 && fenceState.lastSign !== "in") {
+      // 休息日（off）时间门限视为全天开放；普通日必须已到上班时间
+      const timeOk = cfg.off || nowMs >= startMs;
+      if (timeOk) {
+        const rec = addRecord("in", pos, locMode === "sim" ? "sim" : "auto");
         if (rec) {
           fenceState.lastSign = "in";
-          notify("WorkTime", "已到达工作地点，自动签到上班（" + startStr + "）");
-          toast("已到达工作地点，自动签到上班（" + startStr + "）", "ok");
+          const extra = cfg.off ? "（休息日上班）" : "";
+          notify("WorkTime", "已到达工作地点，自动签到上班" + extra + "（" + fmtTime(rec.time) + "）");
+          toast("已到达工作地点，自动签到上班" + extra, "ok");
           renderAll();
         } else {
-          // addRecord 返回 null 表示已经签到过了，也更新围栏状态避免重复提醒
           fenceState.lastSign = "in";
         }
       }
       // else: 提前到围栏但未到上班时间 → 不签到
     }
   } else {
-    if (fenceState.inside === false) {
-      fenceState.count++;
-    } else {
-      fenceState.inside = false;
-      fenceState.count = 1;
-    }
+    fenceState.count = fenceState.inside === false ? fenceState.count + 1 : 1;
+    fenceState.inside = false;
   }
 }
 
 /* ===================== 智能签到提醒 ===================== */
-
-/* ===================== 异常检测 ===================== */
-function detectAnomalies() {
-  const records = DB.records;
-  const anomalies = [];
-  const todayKey = dateKey(new Date());
-  
-  // 1. 检测当日有上班无下班
-  const todayRecords = records.filter(r => dateKey(new Date(r.time)) === todayKey);
-  const hasIn = todayRecords.some(r => r.type === "in");
-  const hasOut = todayRecords.some(r => r.type === "out");
-  if (hasIn && !hasOut) {
-    anomalies.push("今天已打卡上班，但还未签退");
-  }
-  
-  // 2. 检测连续工作天数
-  let streak = 0;
-  const sortedDays = [...new Set(records.map(r => dateKey(new Date(r.time))))].sort().reverse();
-  for (let i = 0; i < sortedDays.length; i++) {
-    const day = sortedDays[i];
-    const dayRecs = records.filter(r => dateKey(new Date(r.time)) === day);
-    const dayHasIn = dayRecs.some(r => r.type === "in");
-    if (dayHasIn) streak++; else break;
-  }
-  if (streak >= 7) {
-    anomalies.push("连续工作" + streak + "天，建议适当休息");
-  }
-  
-  // 3. 检测昨日未签退
-  const yesterday = new Date();
-  yesterday.setDate(yesterday.getDate() - 1);
-  const yestKey = dateKey(yesterday);
-  const yestRecs = records.filter(r => dateKey(new Date(r.time)) === yestKey);
-  const yestHasIn = yestRecs.some(r => r.type === "in");
-  const yestHasOut = yestRecs.some(r => r.type === "out");
-  if (yestHasIn && !yestHasOut) {
-    anomalies.push("昨日（" + yestKey + "）打卡上班但未签退");
-  }
-  
-  return anomalies;
-}
-
-function showAnomalyWarnings() {
-  const anomalies = detectAnomalies();
-  if (anomalies.length > 0) {
-    const msg = anomalies.join("；");
-    toast("⚠ " + msg, "warn");
-    // 只在每天首次打开时弹通知
-    const todayWarned = localStorage.getItem("anomaly_warned_" + dateKey(new Date()));
-    if (!todayWarned) {
-      notify("考勤异常提醒", msg);
-      localStorage.setItem("anomaly_warned_" + dateKey(new Date()), "1");
-    }
-  }
-}
-
 function smartReminder() {
-  // v45: 只提醒上班签到，不提醒签退
+  // v3：休息日不提醒；签退提醒由定时提醒（T7.3）负责
   const now = new Date();
   const nowMs = now.getTime();
   const { startMs, startStr } = getTodayWorkTimes();
@@ -2174,64 +2166,45 @@ function latLngToPx(lat, lng) {
 }
 
 /* ===================== AI 工时分析 ===================== */
-function renderAIAnalysis() {
-  const el = document.getElementById("ai-analysis");
-  if (!el) return;
-  const records = DB.records.filter(r => !r.deleted); // v107修复：统计忽略软删除；字段名修正 hourlyRate→payRate
-  if (records.length === 0) { el.innerHTML = "<p>暂无工时记录，开始打卡后将为您生成分析。</p>"; return; }
-  
-  const now = new Date();
-  let totalHours7d = 0, totalIncome7d = 0, workDays7d = 0;
-  for (let i = 0; i < 7; i++) {
-    const d = new Date(now); d.setDate(d.getDate() - i);
-    const key = dateKey(d);
-    const dayRecs = records.filter(r => dateKey(new Date(r.time)) === key);
-    const dayHours = computeDayHours(dayRecs);
-    if (dayHours > 0) { totalHours7d += dayHours; totalIncome7d += computePay(dayHours * 60,
-        DB.payRate); workDays7d++; }
-  }
-  
-  const avgHours = workDays7d > 0 ? (totalHours7d / workDays7d).toFixed(1) : 0;
-  let suggestions = [];
-  if (avgHours > 10) suggestions.push("⚠ 日均工时较长，注意休息");
-  if (workDays7d >= 7) suggestions.push("⚠ 连续7天工作，建议适当休息");
-  if (DB.payRate < 20) suggestions.push("💡 当前时薪较低，可考虑协商涨薪");
-  if (suggestions.length === 0) suggestions.push("✅ 工时节奏良好，继续保持");
-  
-  el.innerHTML = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px"><div style="background:var(--panel);padding:10px;border-radius:10px;text-align:center"><div style="font-size:20px;color:var(--acc);font-weight:700">' + totalHours7d.toFixed(1) + 'h</div><div style="font-size:11px;color:var(--faint)">近7天总工时</div></div><div style="background:var(--panel);padding:10px;border-radius:10px;text-align:center"><div style="font-size:20px;color:var(--ok);font-weight:700">' + fmtMoney(totalIncome7d) + '</div><div style="font-size:11px;color:var(--faint)">近7天总收入</div></div></div><div style="font-size:12px"><p style="margin-bottom:6px"><strong>智能建议：</strong></p>' + suggestions.map(function(s) { return '<p style="margin:4px 0">' + s + '</p>'; }).join("") + '</div>';
-}
-
-/* ===================== 异常检测 ===================== */
+/* ===================== 异常检测（唯一实现，v3 起生效）===================== */
 function detectAnomalies() {
-  const records = DB.records;
+  const records = (DB.records || []).filter(r => !r.deleted); // 忽略软删除墓碑
   const anomalies = [];
   const todayKey = dateKey(new Date());
-  const todayRecs = records.filter(function(r) { return dateKey(new Date(r.time)) === todayKey; });
-  if (todayRecs.some(function(r) { return r.type === "in"; }) && !todayRecs.some(function(r) { return r.type === "out"; })) {
-    anomalies.push("今天已打卡上班，但还未签退");
+  const todayRecs = records.filter(r => (r.dateKey || dateKey(new Date(r.time))) === todayKey);
+  if (todayRecs.some(r => r.type === "in") && !todayRecs.some(r => r.type === "out")) {
+    anomalies.push("今天已上班签到，但还未签退");
   }
-  
+  // 连续工作天数
   let streak = 0;
-  const sortedDays = [...new Set(records.map(function(r) { return dateKey(new Date(r.time)); }))].sort().reverse();
-  for (let i = 0; i < sortedDays.length; i++) {
-    const dayRecs = records.filter(function(r) { return dateKey(new Date(r.time)) === sortedDays[i]; });
-    if (dayRecs.some(function(r) { return r.type === "in"; })) streak++; else break;
+  const days = [...new Set(records.map(r => r.dateKey || dateKey(new Date(r.time))))].sort().reverse();
+  for (let i = 0; i < days.length; i++) {
+    const dayRecs = records.filter(r => (r.dateKey || dateKey(new Date(r.time))) === days[i]);
+    if (dayRecs.some(r => r.type === "in")) streak++; else break;
   }
-  if (streak >= 7) anomalies.push("连续工作" + streak + "天，建议适当休息");
-  
-  const yesterday = new Date(); yesterday.setDate(yesterday.getDate() - 1);
-  const yestKey = dateKey(yesterday);
-  const yestRecs = records.filter(function(r) { return dateKey(new Date(r.time)) === yestKey; });
-  if (yestRecs.some(function(r) { return r.type === "in"; }) && !yestRecs.some(function(r) { return r.type === "out"; })) {
-    anomalies.push("昨日打卡上班但未签退");
+  if (streak >= 7) anomalies.push("连续工作 " + streak + " 天，建议适当休息");
+  // 昨日未签退
+  const yest = new Date(); yest.setDate(yest.getDate() - 1);
+  const yestKey = dateKey(yest);
+  const yestRecs = records.filter(r => (r.dateKey || dateKey(new Date(r.time))) === yestKey);
+  if (yestRecs.some(r => r.type === "in") && !yestRecs.some(r => r.type === "out")) {
+    anomalies.push("昨日（" + yestKey + "）上班签到但未签退");
   }
   return anomalies;
 }
 
 function showAnomalyWarnings() {
   const anomalies = detectAnomalies();
+  const box = document.getElementById("anomaly-box");
+  if (box) {
+    if (anomalies.length) {
+      box.style.display = "block";
+      box.innerHTML = anomalies.map(a => '<div class="anomaly-item">⚠ ' + escapeHtml(a) + '</div>').join("");
+    } else {
+      box.style.display = "none"; box.innerHTML = "";
+    }
+  }
   if (anomalies.length > 0) {
-    toast("⚠ " + anomalies.join("；"), "warn");
     const warnKey = "anomaly_warned_" + dateKey(new Date());
     if (!localStorage.getItem(warnKey)) {
       notify("考勤异常提醒", anomalies.join("；"));
@@ -2251,60 +2224,59 @@ function renderAll() {
 function renderOverview() {
   const today = new Date();
   const start = dayStartTs(today), end = dayEndTs(today);
+  const todayKey = dateKey(today);
+  const cfg = dayConfigOf(todayKey);
+  const t = cfgTimesFor(todayKey, cfg);
   const minutes = dayMinutes(DB.records, start, end);
-  const pay = computePay(minutes, DB.payRate);
-  const targetMin = getDailyTargetMinutes(DB, dateKey(today));
+  const rateVal = (cfg.rate != null ? cfg.rate : DB.payRate) || 0;
+  const pay = computePay(minutes, rateVal);
+  const targetMin = getDailyTargetMinutes(DB, todayKey);
   const progress = targetMin > 0 ? Math.min(100, Math.round(minutes / targetMin * 100)) : 0;
+  const modeLabel = cfg.mode === "actual" ? "按实际" : "按班次";
 
   $("#ov-hours").textContent = fmtDurShort(minutes);
-  let subText = minutes > 0 ? fmtDur(minutes) : "今日尚未开始";
-  const todayKey = dateKey(today);
-  const breakMin = getDailyBreakMinutes(DB, todayKey);
-  if (breakMin > 0) {
-    subText += ` · 午休扣除 ${fmtDurShort(breakMin)}`;
-  }
-  const firstIn = DB.records.filter(r => r.time >= start && r.time < end && r.type === "in").sort((a,
-      b)=>a.time-b.time)[0];
-  if (firstIn) {
-    const todayKey = dateKey(today);
-    const expStart = (DB.dailyStartTimeMap && DB.dailyStartTimeMap[todayKey]) || DB.dailyStartTime || "09:00";
-    const [h, m] = expStart.split(':').map(Number);
-    const expMs = start + h*3600000 + m*60000;
-    if (firstIn.time > expMs) {
-      const lateMin = Math.round((firstIn.time - expMs)/60000);
-      subText += ` · 迟到 ${fmtDurShort(lateMin)}`;
-    } else {
-      subText += ` · 准时上班`;
-    }
+  let subText = minutes > 0 ? fmtDur(minutes) : (cfg.off ? "休息日" : "今日尚未开始");
+  const breakMin = Math.max(0, parseInt(cfg.breakMin) || 0);
+  if (breakMin > 0) subText += ` · 午休扣除 ${fmtDurShort(breakMin)}`;
+  const firstIn = DB.records.filter(r => !r.deleted && r.time >= start && r.time < end && r.type === "in")
+      .sort((a, b) => a.time - b.time)[0];
+  if (firstIn && !cfg.off) {
+    const lateMin = Math.round((firstIn.time - t.startMs) / 60000);
+    if (lateMin > 1) subText += ` · 迟到 ${fmtDurShort(lateMin)}`;
+    else if (lateMin >= -1) subText += ` · 准时上班`;
+    if (lateMin > 1 || lateMin < -1) subText += `（实到 ${fmtTime(firstIn.time)}）`;
   }
   $("#ov-hours-sub").textContent = subText;
   $("#ov-pay").textContent = fmtMoney(pay);
-  $("#ov-pay-sub").textContent = "@ ¥" + DB.payRate + "/时";
-  $("#ov-progress").textContent = progress + "%";
-  $("#ov-target").textContent = "目标 " + fmtDurShort(targetMin);
+  $("#ov-pay-sub").textContent = "@ ¥" + rateVal + "/时 · " + modeLabel;
+  $("#ov-progress").textContent = cfg.off ? (minutes > 0 ? "休·出勤" : "休息日") : progress + "%";
+  $("#ov-target").textContent = cfg.off ? "休息日 · 不计目标" : "目标 " + fmtDurShort(targetMin);
 
-  $("#pg-bar").style.width = progress + "%";
-  $("#pg-label-text").textContent = fmtDurShort(minutes) + " / " + fmtDurShort(targetMin);
+  $("#pg-bar").style.width = (cfg.off ? (minutes > 0 ? 100 : 0) : progress) + "%";
+  $("#pg-label-text").textContent = fmtDurShort(minutes) + " / " + (cfg.off ? "休" : fmtDurShort(targetMin));
+
+  // 考勤异常提醒展示位
+  showAnomalyWarnings();
 
   const btn = $("#btn-check");
   const od = isOnDuty(DB.records);
-  btn.textContent = od ? "◼ 定位签退" : "📌 上班签到";
+  btn.textContent = od ? "◼ 下班签退" : "📌 上班签到";
   btn.className = "qbtn " + (od ? "ghost" : "primary");
   btn.disabled = !lastPos && !locMode;
 
   const chip = $("#loc-chip");
   if (lastPos) {
     chip.className = "status-chip on";
-    $("#loc-txt").textContent = locMode === "gps" ? "GPS 定位中" : "模拟定位中";
+    $("#loc-txt").textContent = locMode === "gps" ? "GPS 定位中" : (locMode === "sim" ? "模拟定位中" : "定位中");
     const d = lastPos.lat != null ? Math.round(haversine(lastPos.lat, lastPos.lng, DB.workPlace.lat,
         DB.workPlace.lng)) : null;
     const inPlace = d != null && d <= (DB.fenceRadius || 200);
-    // 检测工作点是否仍为默认未设置状态（苏州 31.2988,120.5853 或 北京 39.9088,116.3974）
+    // 检测工作点是否仍为默认未设置状态
     const isDefaultPlace = (Math.abs(DB.workPlace.lat - 31.2988) < 0.0001 && Math.abs(DB.workPlace.lng - 120.5853) < 0.0001) ||
                            (Math.abs(DB.workPlace.lat - 39.9088) < 0.0001 && Math.abs(DB.workPlace.lng - 116.3974) < 0.0001);
     const isWorkPlaceUnset = isDefaultPlace && d != null && d > 10000;
     if (isWorkPlaceUnset) {
-      $("#loc-detail").textContent = "⚠️ 工作地点未设置，请下滑到「我的设置」→ 点击「设为当前位置」";
+      $("#loc-detail").textContent = "⚠️ 工作地点未设置，请到「我的设置」→ 点击「设为当前位置」";
     } else if (inPlace) {
       $("#loc-detail").textContent = "✅ 已在围栏内（" + (DB.fenceRadius || 200) + "m）";
     } else if (d != null) {
@@ -2321,7 +2293,11 @@ function renderOverview() {
 function renderRecords() {
   const today = new Date();
   const start = dayStartTs(today), end = dayEndTs(today);
-  const breakMin = getDailyBreakMinutes(DB, dateKey(today));
+  const dk = dateKey(today);
+  const cfg = dayConfigOf(dk);
+  const t = cfgTimesFor(dk, cfg);
+  const breakMin = Math.max(0, parseInt(cfg.breakMin) || 0);
+  const rateVal = (cfg.rate != null ? cfg.rate : DB.payRate) || 0;
   const shifts = computeShifts(DB.records, start, end, breakMin);
   const tbody = $("#rec-list");
   const emptyEl = $("#rec-empty");
@@ -2330,22 +2306,31 @@ function renderRecords() {
   emptyEl.style.display = "none";
   shifts.forEach((s, idx) => {
     const row = document.createElement("tr");
-    const dk = dateKey(new Date(s.in));
-    const inTime = (DB.dailyStartTimeMap && DB.dailyStartTimeMap[dk] !== undefined)
-      ? DB.dailyStartTimeMap[dk] : (DB.dailyStartTime || "09:00");
-    const inSource = '<span style="color:var(--faint);font-size:10px">(设置)</span>';
-    const outTime = (DB.dailyEndTimeMap && DB.dailyEndTimeMap[dk] !== undefined)
-      ? DB.dailyEndTimeMap[dk] : (DB.dailyEndTime || "18:00");
-    const outSource = '<span style="color:var(--faint);font-size:10px">(设置)</span>';
+    const realIn = fmtTime(s.in);
+    const legacyIn = Math.abs(s.in - t.startMs) < 60000;
+    const billIn = cfg.start || t.startStr, billOut = cfg.end || t.endStr;
+    const inCell = legacyIn
+      ? escapeHtml(billIn)
+      : escapeHtml(billIn) + '<br><span style="color:var(--acc);font-size:11px">实 ' + escapeHtml(realIn) + '</span>';
+    let outCell = '<span style="color:var(--faint)">—</span>';
+    if (s.out) {
+      const legacyOut = Math.abs(s.out - t.endMs) < 60000;
+      outCell = legacyOut
+        ? escapeHtml(billOut)
+        : escapeHtml(billOut) + '<br><span style="color:var(--acc);font-size:11px">实 ' + escapeHtml(fmtTime(s.out)) + '</span>';
+    }
     const hours = (s.minutes / 60).toFixed(1);
-    const income = fmtMoney((s.minutes / 60) * (DB.payRate || 0));
-    const status = s.out ? (s.rawMinutes - s.breakMinutes > 0 ? `<span class="tag ok">正常</span>` :
-        `<span class="tag warn">异常</span>`) : `<span class="tag in">工作中</span>`;
+    const income = fmtMoney((s.minutes / 60) * rateVal);
+    const src = s.source || "auto";
+    const srcBadge = src === "sim" ? '<span class="tag late">模拟</span>' :
+        (src === "manual" ? '<span class="tag in">手动</span>' : (src === "native" ? '<span class="tag in">原生</span>' : ''));
+    const status = !s.out ? '<span class="tag in">工作中</span>'
+        : (s.rawMinutes - s.breakMinutes > 0 ? '<span class="tag ok">正常</span>' : '<span class="tag warn">异常</span>');
     row.innerHTML = `
       <td>${escapeHtml(dk)}${dk === dateKey(today) ? ' <span style="color:var(--ok)">今天</span>' : ""}</td>
-      <td><span class="tag in">上班</span></td>
-      <td>${escapeHtml(inTime)}${inSource}</td>
-      <td>${escapeHtml(outTime)}${outSource}</td>
+      <td><span class="tag in">上班</span>${srcBadge}</td>
+      <td>${inCell}</td>
+      <td>${outCell}</td>
       <td>${hours}h</td>
       <td>${income}</td>
       <td>${status}</td>
@@ -2399,13 +2384,15 @@ function renderStats() {
       const dk = dateKey(d);
       const dStart = dayStartTs(d);
       const dEnd = dayEndTs(d);
-      const breakMin = getDailyBreakMinutes(DB, dk);
+      const cfg = dayConfigOf(dk);
+      const breakMin = Math.max(0, parseInt(cfg.breakMin) || 0);
       const targetMin = getDailyTargetMinutes(DB, dk);
       const targetHours = targetMin / 60;
+      const rateVal = (cfg.rate != null ? cfg.rate : DB.payRate) || 0;
       const shifts = computeShifts(DB.records, dStart, dEnd, breakMin);
-      const dayMinutes = shifts.reduce((s, x) => s + x.minutes, 0);
-      const dayHours = dayMinutes / 60;
-      const income = dayHours * (DB.payRate || 0);
+      const dayMinutesTotal = shifts.reduce((s, x) => s + x.minutes, 0);
+      const dayHours = dayMinutesTotal / 60;
+      const income = dayHours * rateVal;
       const completion = targetHours > 0 ? Math.round((dayHours / targetHours) * 100) : 0;
       const hasSign = shifts.length > 0;
       const isToday = dk === dateKey(today);
@@ -2417,12 +2404,12 @@ function renderStats() {
       }
       
       rowsHtml += `<tr data-dk="${dk}">
-        <td class="date-cell">${dk}${isToday ? ' <span style="color:var(--ok);font-size:10px">今天</span>' : ""}</td>
+        <td class="date-cell">${dk}${isToday ? ' <span style="color:var(--ok);font-size:10px">今天</span>' : ""}${cfg.off ? ' <span style="color:var(--faint);font-size:10px">休</span>' : ""}</td>
         <td class="hours-cell">${hasSign ? dayHours.toFixed(1) + 'h' : '<span style="color:var(--faint)">—</span>'}</td>
         <td>${breakMin}min</td>
         <td class="money-cell">${hasSign ? fmtMoney(income) : '<span style="color:var(--faint)">—</span>'}</td>
-        <td>${targetHours}h</td>
-        <td><span class="tag ${completion >= 100 ? 'ok' : (completion >= 80 ? 'warn' : 'late')}">${completion}%</span></td>
+        <td>${cfg.off ? '休' : targetHours + 'h'}</td>
+        <td><span class="tag ${cfg.off ? 'in' : (completion >= 100 ? 'ok' : (completion >= 80 ? 'warn' : 'late'))}">${cfg.off ? '休' : completion + '%'}</span></td>
         <td>${hasSign ? `<button class="fbtn edit-btn" data-action="edit-shift" data-dk="${dk}" style="padding:2px 6px;font-size:10px">修改</button>` : '<span style="color:var(--faint)">—</span>'}</td>
       </tr>`;
     });
@@ -2851,19 +2838,29 @@ function pollCheckIn() {
 }
 
 function doCheck() {
-  // v45: 只处理上班签到，不签退。时间固定为设置上班时间
+  // T2.1：按在岗状态分流 —— 未在岗=上班签到（需围栏内），在岗=下班签退（随处可签）
   const pos = lastPos || {};
-  // 检查是否在围栏内
-  if (!isInsideFence(pos)) {
-    toast("未在「工作地点" + (DB.fenceRadius || 200) + "米」范围内，无法签到", "warn");
+  const onDuty = isOnDuty(DB.records);
+  if (!onDuty) {
+    if (!isInsideFence(pos)) {
+      toast("未在「工作地点" + (DB.fenceRadius || 200) + "米」范围内，无法签到", "warn");
+      return;
+    }
+    const rec = addRecord("in", pos, "manual");
+    if (rec) {
+      fenceState.lastSign = "in";
+      notify("WorkTime", "上班签到成功（" + fmtTime(rec.time) + "）");
+      toast("签到成功 · " + fmtTime(rec.time), "ok");
+      renderAll();
+    }
     return;
   }
-  const rec = addRecord("in", pos);
+  const rec = addRecord("out", pos, "manual");
   if (rec) {
-    fenceState.lastSign = "in";
-    const { startStr } = getTodayWorkTimes();
-    notify("WorkTime", "手动签到上班成功（" + startStr + "）");
-    toast("签到成功（" + startStr + "）", "ok");
+    fenceState.lastSign = "out";
+    const distTxt = (pos && isFinite(distToWork(pos))) ? " · 距工作点 " + Math.round(distToWork(pos)) + "m" : "";
+    notify("WorkTime", "下班签退成功（" + fmtTime(rec.time) + "）");
+    toast("签退成功 · " + fmtTime(rec.time) + distTxt, "ok");
     renderAll();
   }
 }
@@ -2895,20 +2892,19 @@ $("#btn-bmap").addEventListener("click", () => {
 $("#save-pay").addEventListener("click", () => {
   const r = parseFloat($("#set-pay").value);
   if (isNaN(r) || r < 0 || r > 9999) { toast("请输入有效时薪", "warn"); return; }
-  DB.payRate = Math.round(r * 100) / 100;
-  if (!saveDB()) { toast("保存失败：浏览器限制了本地存储，请尝试更换浏览器或使用导出数据功能备份", "bad"); return; }
-  renderAll();
-  toast("时薪已更新", "ok");
+  // T4.2：时薪变更先冻结历史，历史日收入按快照 rate 锁定，今天起按新值
+  if (!changeDefaults({ payRate: Math.round(r * 100) / 100 })) {
+    toast("保存失败：浏览器限制了本地存储，请尝试更换浏览器或使用导出数据功能备份", "bad"); return;
+  }
+  toast("时薪已更新（历史记录已锁定）", "ok");
 });
 $("#save-break").addEventListener("click", () => {
   const v = parseInt($("#set-break").value, 10);
   if (isNaN(v) || v < 0 || v > 300) { toast("午休时长请输入 0–300 分钟之间的数字", "warn"); return; }
-  DB.dailyBreakMinutes = v;
-  const times = getTodayWorkTimes();
-  DB.dailyHours = times.hours;
-  if (!saveDB()) { toast("保存失败：浏览器限制了本地存储", "bad"); return; }
-  renderAll();
-  toast("默认每日午休已更新，目标工时已同步为 " + times.hours.toFixed(1) + " 小时", "ok");
+  if (!changeDefaults({ dailyBreakMinutes: v })) {
+    toast("保存失败：浏览器限制了本地存储", "bad"); return;
+  }
+  toast("默认每日午休已更新（历史已锁定）", "ok");
 });
 $("#save-fence").addEventListener("click", () => {
   const v = parseInt($("#set-fence").value, 10);
@@ -2921,23 +2917,20 @@ $("#save-fence").addEventListener("click", () => {
 });
 $("#save-start").addEventListener("click", () => {
   const v = $("#set-start").value;
-  if (!v || !/^\d{2}:\d{2}$/.test(v)) { toast("请输入有效的上班时间（HH:MM）", "warn"); return; }
-  DB.dailyStartTime = v;
-  const times = getTodayWorkTimes();
-  DB.dailyHours = times.hours;
-  if (!saveDB()) { toast("保存失败：浏览器限制了本地存储，请尝试更换浏览器或使用导出数据功能备份", "bad"); return; }
-  renderAll();
-  toast("默认每日上班时间已更新，目标工时已同步为 " + times.hours.toFixed(1) + " 小时", "ok");
+  if (!parseHM(v)) { toast("请输入有效的上班时间（HH:MM）", "warn"); return; }
+  // T3.2：默认值变更走 changeDefaults（先冻结历史再应用新值）
+  if (!changeDefaults({ dailyStartTime: v })) {
+    toast("保存失败：浏览器限制了本地存储，请尝试更换浏览器或使用导出数据功能备份", "bad"); return;
+  }
+  toast("默认上班时间已更新（历史记录已锁定）", "ok");
 });
 $("#save-end").addEventListener("click", () => {
   const v = $("#set-end").value;
-  if (!v || !/^\d{2}:\d{2}$/.test(v)) { toast("请输入有效的下班时间（HH:MM）", "warn"); return; }
-  DB.dailyEndTime = v;
-  const times = getTodayWorkTimes();
-  DB.dailyHours = times.hours;
-  if (!saveDB()) { toast("保存失败：浏览器限制了本地存储，请尝试更换浏览器或使用导出数据功能备份", "bad"); return; }
-  renderAll();
-  toast("默认每日下班时间已更新，目标工时已同步为 " + times.hours.toFixed(1) + " 小时", "ok");
+  if (!parseHM(v)) { toast("请输入有效的下班时间（HH:MM）", "warn"); return; }
+  if (!changeDefaults({ dailyEndTime: v })) {
+    toast("保存失败：浏览器限制了本地存储，请尝试更换浏览器或使用导出数据功能备份", "bad"); return;
+  }
+  toast("默认下班时间已更新（历史记录已锁定）", "ok");
 });
 $("#edit-daily").addEventListener("click", () => {
   const list = $("#dh-list");
