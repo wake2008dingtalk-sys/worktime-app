@@ -1726,7 +1726,7 @@ jobs:
           # minSdk 24 时 apksigner 默认可能不生成 v1 签名，个别安装器会报「该安装包未包含任何证书」。
           $ANDROID_HOME/build-tools/34.0.0/apksigner sign \
             --ks /tmp/release.keystore --ks-key-alias "$KEY_ALIAS" \
-            --ks-pass pass:"$KEYSTORE_PASSWORD" --key-pass pass:"$KEY_PASSWORD" \
+            --ks-pass pass:"$KEYSTORE_PASSWORD" \
             --v1-signing-enabled true --v2-signing-enabled true --v3-signing-enabled true \
             --out android/app/build/outputs/apk/release/worktime-release.apk /tmp/aligned.apk
           $ANDROID_HOME/build-tools/34.0.0/apksigner verify --verbose --print-certs android/app/build/outputs/apk/release/worktime-release.apk | head -20
