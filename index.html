@@ -1256,6 +1256,8 @@ function computeShifts(records, dayStart, dayEnd, breakMinutes, cfgOverride) {
   const breakMin = (breakMinutes !== undefined && breakMinutes !== null)
     ? Math.max(0, parseInt(breakMinutes) || 0) : Math.max(0, parseInt(cfg.breakMin) || 0);
   const targetMin = Math.max(0, Math.round(setMin - breakMin));
+  // T5.3：休息日默认按"实际在场"计（跳过未配对补全），工时=实际在场−午休
+  const effMode = cfg.off ? "actual" : cfg.mode;
   // v107修复：过滤软删除记录；下班记录按序消费，避免多个上班配对同一个下班（双计工时）
   // v111fix10：下班记录窗口扩至次日6小时——跨午夜班次的下班打卡落在次日
   const inRs = records.filter(r => !r.deleted && r.time >= dayStart && r.time < dayEnd && r.type === "in").sort((a,
@@ -1271,7 +1273,7 @@ function computeShifts(records, dayStart, dayEnd, breakMinutes, cfgOverride) {
       outIdx++; // 消费该下班记录：同一天第二个上班不会再配到它
       const rawMin = Math.max(0, (out.time - rIn.time) / 60000);
       // shift=方案A（按设置班次，早到/晚退不增减）；actual=按实际时长（加班如实体现）
-      const minutes = cfg.mode === "actual"
+      const minutes = effMode === "actual"
         ? Math.max(0, rawMin - breakMin)
         : Math.max(0, setMin - breakMin);
       shifts.push({ in: rIn.time, out: out.time, minutes, rawMinutes: rawMin, breakMinutes: breakMin, distIn:
@@ -1283,11 +1285,11 @@ function computeShifts(records, dayStart, dayEnd, breakMinutes, cfgOverride) {
   const nowMs = Date.now();
   inRs.forEach(rIn => {
     if (!pairedIn.has(rIn.time)) {
-      const softEnd = cfg.mode === "actual"
+      const softEnd = effMode === "actual"
         ? Math.min(setEndMs, dayEnd, Math.max(nowMs, rIn.time))
         : Math.min(setEndMs, dayEnd);
       let minutes, rawMin;
-      if (cfg.mode === "actual") {
+      if (effMode === "actual") {
         rawMin = Math.max(0, (softEnd - rIn.time) / 60000);
         minutes = Math.max(0, rawMin - breakMin);
       } else {
@@ -1302,7 +1304,7 @@ function computeShifts(records, dayStart, dayEnd, breakMinutes, cfgOverride) {
   const sorted = shifts.sort((a, b) => a.in - b.in);
   // 每日封顶：shift 模式合计 ≤ 目标工时（防补录/重复打卡翻倍）；
   // actual 模式只做 24h 合理性封顶，让加班如实体现
-  let remaining = cfg.mode === "actual" ? 24 * 60 : targetMin;
+  let remaining = effMode === "actual" ? 24 * 60 : targetMin;
   sorted.forEach(s => {
     s.minutes = Math.min(s.minutes, Math.max(0, remaining));
     remaining -= s.minutes;
@@ -3712,9 +3714,22 @@ function renderSugList(items) {
 }
 
 async function searchPlaceSuggestions(query) {
-  // v109：Place Web API 需服务端类型 AK；未单独配置时回退 BAIDU_MAP_AK 尝试
+  // T6.2：优先走 CloudBase 云函数代理（服务端 AK 只存在云函数环境变量里）
+  try {
+    if (window.CloudSync && typeof window.CloudSync.cloudCall === "function") {
+      const res = await window.CloudSync.cloudCall("placeSearch", { query: query, region: "全国" });
+      const data = (res && res.result) ? res.result : res;
+      if (data && data.status === 0 && Array.isArray(data.result)) {
+        const items = data.result.filter(function(it) {
+          return it.location && Math.abs(it.location.lat) > 0.01 && Math.abs(it.location.lng) > 0.01;
+        });
+        if (items.length) return { ok: true, items: items, status: 0, via: "cloud" };
+      }
+    }
+  } catch (e) { Logger.warn("cloud placeSearch failed, fallback to direct:", e); }
+  // 回退：旧版直连 Place Web API（仅当客户端仍配置了 AK 时；CI 构建如不再注入 AK 则该路径自动失效）
   const ak = BAIDU_PLACE_AK || BAIDU_MAP_AK;
-  if (!ak || ak === "YOUR_AK_HERE") return { ok: false, items: null, message: "AK 未配置" };
+  if (!ak || ak === "YOUR_AK_HERE") return { ok: false, items: null, message: "服务端检索未配置（请部署 placeSearch 云函数）" };
   const url = "https://api.map.baidu.com/place/v2/suggestion?query=" + encodeURIComponent(query)
     + "&region=" + encodeURIComponent("全国")
     + "&output=json&ak=" + encodeURIComponent(ak);
@@ -3727,7 +3742,7 @@ async function searchPlaceSuggestions(query) {
   const items = data.result.filter(function(it) {
     return it.location && Math.abs(it.location.lat) > 0.01 && Math.abs(it.location.lng) > 0.01;
   });
-  return { ok: true, items: items, status: 0 };
+  return { ok: true, items: items, status: 0, via: "direct" };
 }
 
 function applySearchedPlace(name, bdLat, bdLng) {
@@ -5078,7 +5093,9 @@ function initAIChat() {
     markSettingsDirty: function() { _settingsDirty = true; },
     bidirectionalSync: bidirectionalSync,
     renderCloudBindStatus: renderCloudBindStatus,
-    checkBindStatus: checkBindStatus
+    checkBindStatus: checkBindStatus,
+    // T6.2：暴露 cloudCall 给 Place 检索等场景复用（匿名登录态 + 云函数）
+    cloudCall: cloudCall
   };
 }
 
