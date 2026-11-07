@@ -1739,6 +1739,15 @@ function addRecord(type, pos, source) {
   const now = Date.now();
   const todayKey = dateKey(new Date(now));
   const recType = type === "out" ? "out" : "in";
+  /* v1.1.12：写入前必须先过「工作区闸门」。
+     自动签到、手动上班签到、手动下班签退三条路径都汇到这里，
+     在这一层拦截可以确保任何调用方都不会在围栏外产生记录。 */
+  const gate = checkRecordGate(recType === "in" ? "上班签到" : "下班签退");
+  if (!gate.ok) {
+    Logger.warn("addRecord 被工作区闸门拦截:", gate.msg);
+    toast(gate.msg, "warn", 6000);
+    return null;
+  }
   // 防重复：同一天同类型只记一次（忽略软删除墓碑）
   const already = DB.records.some(r => !r.deleted && r.type === recType &&
       dateKey(new Date(r.time)) === todayKey);
@@ -1746,7 +1755,8 @@ function addRecord(type, pos, source) {
     toast(recType === "in" ? "今天已经签到过了" : "今天已经签退过了", "warn");
     return null;
   }
-  const distVal = (pos && isFinite(distToWork(pos))) ? Math.round(distToWork(pos)) : null;
+  const distVal = isFinite(gate.dist) ? gate.dist
+      : ((pos && isFinite(distToWork(pos))) ? Math.round(distToWork(pos)) : null);
   const rec = {
     id: "r" + now.toString(36) + Math.random().toString(36).slice(2, 5),
     type: recType,
@@ -1756,6 +1766,9 @@ function addRecord(type, pos, source) {
     lng: pos && pos.lng != null ? pos.lng : null,
     acc: pos && pos.acc != null ? pos.acc : null,
     dist: distVal,
+    // v1.1.12：记录判定依据（距工作点米数 / 围栏半径 / 定位新鲜度），便于事后审计
+    fenceRadius: gate.radius,
+    posAgeMs: lastPosAt ? (now - lastPosAt) : null,
     source: source || (locMode === "sim" ? "sim" : "auto"),
     updatedAt: now
   };
@@ -1778,7 +1791,7 @@ function resetDB() {
 }
 
 /* ===================== v3 功能实现（任务书第 4/5/7 批）===================== */
-var APP_VERSION = "1.1.11"; // v1.1.11：云函数调用超时保护（未登录云开发/云函数不可达时搜索不再永久挂起）；v1.1.10：修复搜索无响应——①云函数返回体解包错位导致云路径从不生效 ②识别百度"天配额超限"并立即提示 ③搜索加12秒超时+按钮"搜索中"状态 ④同名匹配防止采纳别家公司坐标 ⑤搜索结果缓存降低配额消耗 ⑥输入联想防抖300→500ms、门槛2→3字；v1.1.9：修复工作地定位——①拒绝行政区级(城市/区县)坐标入库 ②「设为当前位置」主动取新鲜GPS ③原生地图红标/围栏跟随工作地变更 ④红标可拖拽回写坐标 ⑤修正原生地图WGS84/BD09坐标偏移
+var APP_VERSION = "1.1.12"; // v1.1.12：未到工作区禁止任何签到记录操作——新增 checkRecordGate() 统一闸门（工作地已设置+定位有效+定位≤60秒新鲜+在围栏内），接入 addRecord/doCheck/补录三处；签退不再"随处可签"；补录改存真实坐标；v1.1.11：云函数调用超时保护（未登录云开发/云函数不可达时搜索不再永久挂起）；v1.1.10：修复搜索无响应——①云函数返回体解包错位导致云路径从不生效 ②识别百度"天配额超限"并立即提示 ③搜索加12秒超时+按钮"搜索中"状态 ④同名匹配防止采纳别家公司坐标 ⑤搜索结果缓存降低配额消耗 ⑥输入联想防抖300→500ms、门槛2→3字；v1.1.9：修复工作地定位——①拒绝行政区级(城市/区县)坐标入库 ②「设为当前位置」主动取新鲜GPS ③原生地图红标/围栏跟随工作地变更 ④红标可拖拽回写坐标 ⑤修正原生地图WGS84/BD09坐标偏移
 const WEEKDAY_NAMES = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
 
 // ---- 通用自绘弹层：确认 / 输入（替代系统 confirm/prompt）----
@@ -2212,6 +2225,50 @@ function distToWork(pos) {
 function isInsideFence(pos) {
   return distToWork(pos) <= (DB.fenceRadius || 200);
 }
+
+/* v1.1.12：签到记录统一闸门（未在工作区一律禁止产生记录）
+   需求来源：真机反馈——距工作点 3088m（围栏 100m）时仍产生了签到记录，
+   且「按班次」模式下该记录直接按整班计薪（11h30m / 100%），等于白拿满勤。
+
+   此前只有「上班签到」在 doCheck 里做了围栏校验，以下三条路径完全不校验：
+     1) 下班签退（doCheck 里原注释写明"随处可签"）
+     2) addRecord 本身不做任何校验（自动签到 / 手动打卡都汇到这里）
+     3) 补录弹窗（add-save）直接把 lat/lng 写成工作地坐标、时间默认当前
+
+   本闸门统一拦截，并额外要求定位「新鲜」——否则几小时前在公司的旧坐标
+   会一直通过校验，人在家也能签到。 */
+const RECORD_POS_MAX_AGE_MS = 60000;   // 定位最长有效期：60 秒
+
+function checkRecordGate(actionLabel) {
+  const label = actionLabel || "签到";
+  // 1) 工作地必须已设置，否则无法判定"是否在工作区"
+  if (!DB.workPlace || !isFinite(DB.workPlace.lat) || !isFinite(DB.workPlace.lng)) {
+    return { ok: false, msg: "工作地点未设置，无法判定是否在工作区，已阻止" + label };
+  }
+  // 2) 必须有有效定位
+  if (!lastPos || lastPos.lat == null || lastPos.lng == null ||
+      !isFinite(lastPos.lat) || !isFinite(lastPos.lng)) {
+    return { ok: false, msg: "尚未取得有效定位，无法确认在工作区，已阻止" + label };
+  }
+  // 3) 定位必须新鲜（防止用旧坐标蒙过围栏）
+  const ageMs = lastPosAt ? (Date.now() - lastPosAt) : Infinity;
+  if (!(ageMs <= RECORD_POS_MAX_AGE_MS)) {
+    const ageTxt = isFinite(ageMs) ? Math.round(ageMs / 1000) + " 秒前" : "从未更新";
+    return { ok: false, msg: "定位已过期（" + ageTxt + "），请点「GPS」重新定位后再" + label };
+  }
+  // 4) 必须在围栏半径内
+  const radius = DB.fenceRadius || 200;
+  const d = distToWork(lastPos);
+  if (!(d <= radius)) {
+    const dTxt = isFinite(d) ? Math.round(d) + " 米" : "未知";
+    return {
+      ok: false,
+      dist: isFinite(d) ? Math.round(d) : null,
+      msg: "未在工作区（" + radius + " 米）内，当前距 " + dTxt + "，已阻止" + label
+    };
+  }
+  return { ok: true, dist: Math.round(d), radius: radius };
+}
 // v45: 强制签退已废除，函数保留为空避免调用处报错
 function forceCheckoutIfDue() {
   // 不再执行签退逻辑。签到记录由 addRecord 统一按设置上班时间记录
@@ -2219,6 +2276,14 @@ function forceCheckoutIfDue() {
 
 function checkFence(pos) {
   if (!pos) return;
+  /* v1.1.12：把本次参与判定的坐标登记为「当前定位」并刷新时间戳。
+     轮询定位 pollCheckIn 是直接拿 getCurrentPosition 的结果调用本函数，
+     原先不回写 lastPos/lastPosAt，导致 addRecord 的闸门拿到的可能是几分钟前的旧坐标。
+     在入口统一回写，保证"判定用的坐标"与"闸门校验的坐标"是同一个且新鲜。 */
+  if (pos.lat != null && pos.lng != null && isFinite(pos.lat) && isFinite(pos.lng)) {
+    lastPos = { lat: pos.lat, lng: pos.lng, acc: pos.acc };
+    lastPosAt = Date.now();
+  }
   const nowIn = isInsideFence(pos);
   const now = new Date();
   const todayKey = dateKey(now);
@@ -3421,14 +3486,18 @@ function pollCheckIn() {
 }
 
 function doCheck() {
-  // T2.1：按在岗状态分流 —— 未在岗=上班签到（需围栏内），在岗=下班签退（随处可签）
-  const pos = lastPos || {};
+  /* v1.1.12：签到与签退都必须先过「工作区闸门」。
+     原实现里签退是"随处可签"（注释 T2.1），与"未到工作区禁止任何签到记录操作"冲突；
+     现在统一按围栏判定：不在工作区就一律不产生记录，并明确告知距工作区多远。 */
   const onDuty = isOnDuty(DB.records);
+  const action = onDuty ? "下班签退" : "上班签到";
+  const gate = checkRecordGate(action);
+  if (!gate.ok) {
+    toast(gate.msg, "warn", 6000);
+    return;
+  }
+  const pos = lastPos || {};
   if (!onDuty) {
-    if (!isInsideFence(pos)) {
-      toast("未在「工作地点" + (DB.fenceRadius || 200) + "米」范围内，无法签到", "warn");
-      return;
-    }
     const rec = addRecord("in", pos, "manual");
     if (rec) {
       fenceState.lastSign = "in";
@@ -4267,6 +4336,14 @@ $("#add-save").addEventListener("click", () => {
   if (!val) { toast("请选择时间", "warn"); return; }
   const newTime = new Date(val).getTime();
   if (isNaN(newTime)) { toast("时间格式错误", "warn"); return; }
+  /* v1.1.12：补录同样受「工作区闸门」约束。
+     原实现不校验位置，且把 lat/lng 直接写成工作地坐标、时间默认当前，
+     等于绕开围栏凭空产生一条"在公司"的记录（按班次模式还会自动算满班）。 */
+  const gate = checkRecordGate(type === "in" ? "补录上班打卡" : "补录下班打卡");
+  if (!gate.ok) {
+    toast(gate.msg, "warn", 6000);
+    return;
+  }
   const dk = dateKey(new Date(newTime));
   const rec = {
     // v111fix9：补录记录补齐 id/updatedAt——缺 id 导致云同步合并键退化为时间键，
@@ -4275,9 +4352,12 @@ $("#add-save").addEventListener("click", () => {
     dateKey: dk,
     type: type,
     time: newTime,
-    lat: DB.workPlace ? DB.workPlace.lat : 0,
-    lng: DB.workPlace ? DB.workPlace.lng : 0,
-    acc: 0,
+    // v1.1.12：改存真实定位坐标（原来是直接填工作地坐标，等于伪造"在公司"）
+    lat: lastPos && lastPos.lat != null ? lastPos.lat : null,
+    lng: lastPos && lastPos.lng != null ? lastPos.lng : null,
+    acc: lastPos && lastPos.acc != null ? lastPos.acc : null,
+    dist: isFinite(gate.dist) ? gate.dist : null,
+    fenceRadius: gate.radius,
     source: "manual",
     deviceId: "web_manual",
     updatedAt: Date.now()
