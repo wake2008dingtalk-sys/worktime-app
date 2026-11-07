@@ -663,6 +663,10 @@ main{padding:14px;max-width:720px;margin:0 auto;padding-bottom:80px}
       <label></label>
       <span id="wp-distance-hint" style="color:var(--faint);font-size:11px;line-height:1.6"></span>
     </div>
+    <div class="set-row" style="margin-top:2px">
+      <label></label>
+      <span id="cur-pos-hint" style="color:var(--faint);font-size:11px;line-height:1.6"></span>
+    </div>
     <div class="set-row" style="margin-top:4px;gap:4px">
       <label style="min-width:auto;color:var(--faint);font-size:12px">微调</label>
       <button class="fbtn" id="nudge-n" title="向北移10米">↑北</button>
@@ -748,7 +752,7 @@ main{padding:14px;max-width:720px;margin:0 auto;padding-bottom:80px}
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
         <button class="fbtn" id="btn-privacy">📄 隐私政策</button>
         <button class="fbtn" id="btn-terms">📄 用户协议</button>
-        <span id="app-ver-label" style="color:var(--faint);font-size:12px">版本 1.1.9</span>
+        <span id="app-ver-label" style="color:var(--faint);font-size:12px">版本 1.2.0</span>
       </div>
     </div>
     <div class="set-row">
@@ -1782,7 +1786,7 @@ function resetDB() {
 }
 
 /* ===================== v3 功能实现（任务书第 4/5/7 批）===================== */
-var APP_VERSION = "1.1.9"; // v1.1.9：APK端可拖拽红标、点击地图选点、一键"地图中心设为工作地"（修复APK端根本改不动工作地的问题）
+var APP_VERSION = "1.2.0"; // v1.2.0：一键「我就在工作地」主动取新鲜GPS重设工作地（不再依赖可能为空的缓存定位），设置页实时显示当前定位坐标/精度/时间
 const WEEKDAY_NAMES = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
 
 // ---- 通用自绘弹层：确认 / 输入（替代系统 confirm/prompt）----
@@ -2164,6 +2168,7 @@ function checkAppVersion() {
 
 /* ===================== 全局状态 ===================== */
 let lastPos = null;
+let lastPosAt = 0; // v120：记录最近一次定位时间，用于判断坐标是否新鲜
 let watchId = null, simInt = null, locMode = null, bgGeoWatch = null;
 let mapZoom = 18, mapCenter = { lat: DB.workPlace.lat, lng: DB.workPlace.lng };
 let isDragging = false, dragStart = null, mapCenterStart = null;
@@ -3380,6 +3385,7 @@ function applyPos(pos, mode) {
     Logger.warn("定位精度不足，跳过围栏检测:", pos.acc, "米");
   }
   lastPos = { lat: pos.lat, lng: pos.lng, acc: pos.acc };
+  lastPosAt = Date.now();
   if (mode === "gps") $("#btn-gps").textContent = "📡 GPS 中";
   if (bmap) { const bd = wgs84ToBd09Point(pos.lat, pos.lng); bmap.panTo(bd); }
   updatePosMarker();
@@ -3660,7 +3666,16 @@ function updateWorkPlaceHint() {
   if (!lastPos) {
     el.textContent = "定位未开启，无法比对距离（打开定位后可校验是否设错）";
     el.style.color = "var(--faint)";
+    const cp0 = document.getElementById("cur-pos-hint");
+    if (cp0) cp0.textContent = "当前定位：未获取——请先在首页点「📡 真实GPS」启动定位";
     return;
+  }
+  const cp = document.getElementById("cur-pos-hint");
+  if (cp) {
+    const age = lastPosAt ? Math.round((Date.now() - lastPosAt) / 1000) : -1;
+    const ageTxt = age < 0 ? "" : (age < 60 ? age + " 秒前" : Math.round(age / 60) + " 分钟前");
+    cp.textContent = "当前定位：" + lastPos.lat.toFixed(6) + ", " + lastPos.lng.toFixed(6) +
+      "（精度约 " + Math.round(lastPos.acc || 0) + " 米" + (ageTxt ? "，更新于 " + ageTxt : "") + "）";
   }
   const d = haversine(lastPos.lat, lastPos.lng, lat, lng);
   const txt = d >= 1000 ? (d / 1000).toFixed(1) + " 公里" : Math.round(d) + " 米";
@@ -3938,16 +3953,50 @@ $("#btn-search-place").addEventListener("click", async () => {
   tip += "也可手动输入经纬度。";
   toast(tip, "warn", 6000);
 });
-$("#place-here").addEventListener("click", () => {
-  if (!lastPos) { toast("请先启动定位", "warn"); return; }
-  $("#set-lat").value = lastPos.lat.toFixed(6);
-  $("#set-lng").value = lastPos.lng.toFixed(6);
-  DB.workPlace = { lat: lastPos.lat, lng: lastPos.lng, name: DB.workPlace.name || "工作地点" };
+$("#place-here").addEventListener("click", () => { setWorkPlaceToCurrent(); });
+
+/* v120：一键「我就在工作地」——主动取一次新鲜高精度定位，不再依赖可能为空/过期的 lastPos */
+function commitCurrentAsWorkPlace(p) {
+  $("#set-lat").value = p.lat.toFixed(6);
+  $("#set-lng").value = p.lng.toFixed(6);
+  DB.workPlace = { lat: p.lat, lng: p.lng, name: DB.workPlace.name || "工作地点" };
   saveDB();
-  updateMapWorkPlace(lastPos.lat, lastPos.lng);
+  updateMapWorkPlace(p.lat, p.lng);
   renderAll();
-  toast("已设为当前位置", "ok");
-});
+  toast("已把当前位置设为工作地点（精度约 " + Math.round(p.acc || 0) + " 米）", "ok", 4000);
+}
+async function setWorkPlaceToCurrent() {
+  // 30 秒内的鲜活定位直接用
+  if (lastPos && lastPosAt && (Date.now() - lastPosAt) < 30000) {
+    commitCurrentAsWorkPlace(lastPos);
+    return;
+  }
+  if (!navigator.geolocation) { toast("设备不支持定位", "bad"); return; }
+  toast("正在获取当前位置，请稍候…", "ok", 3000);
+  try {
+    const pos = await new Promise(function (resolve, reject) {
+      navigator.geolocation.getCurrentPosition(resolve, reject,
+        { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 });
+    });
+    const p = { lat: pos.coords.latitude, lng: pos.coords.longitude, acc: pos.coords.accuracy };
+    lastPos = p; lastPosAt = Date.now();
+    commitCurrentAsWorkPlace(p);
+  } catch (err) {
+    if (err && err.code === 1) {
+      toast("定位权限被拒绝，请先在系统设置中允许本应用定位", "bad", 6000);
+      if (window.confirm("定位权限未开启。是否前往系统设置开启？")) {
+        try {
+          if (window.BackgroundGeolocation && window.BackgroundGeolocation.openSettings) window.BackgroundGeolocation.openSettings();
+          else window.location.href = "intent:#Intent;action=android.settings.APPLICATION_DETAILS_SETTINGS;package=com.worktime.tracker;end";
+        } catch (e) {}
+      }
+    } else if (err && err.code === 3) {
+      toast("定位超时：请到空旷处、或先在首页点「📡 真实GPS」启动定位后再试；也可以改用下方「把地图中心设为工作地」", "bad", 7000);
+    } else {
+      toast("定位失败：" + ((err && err.message) || "未知错误") + "。可改用「把地图中心设为工作地」手动设置", "bad", 7000);
+    }
+  }
+}
 
 /* v117：把地图当前中心点设为工作地（不依赖 GPS，适合定位漂移/不在现场时使用） */
 $("#map-center-place").addEventListener("click", async () => {
@@ -5293,7 +5342,7 @@ function initAIChat() {
     });
 
     // 版本号展示（供应用商店截图与自查）
-    var v = $("app-ver-label"); if (v) v.textContent = "版本 " + (window.APP_VERSION || "1.1.9");
+    var v = $("app-ver-label"); if (v) v.textContent = "版本 " + (window.APP_VERSION || "1.2.0");
   }
 
   function boot() {
