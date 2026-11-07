@@ -740,7 +740,7 @@ main{padding:14px;max-width:720px;margin:0 auto;padding-bottom:80px}
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
         <button class="fbtn" id="btn-privacy">📄 隐私政策</button>
         <button class="fbtn" id="btn-terms">📄 用户协议</button>
-        <span id="app-ver-label" style="color:var(--faint);font-size:12px">版本 1.1.7</span>
+        <span id="app-ver-label" style="color:var(--faint);font-size:12px">版本 1.1.8</span>
       </div>
     </div>
     <div class="set-row">
@@ -1774,7 +1774,7 @@ function resetDB() {
 }
 
 /* ===================== v3 功能实现（任务书第 4/5/7 批）===================== */
-var APP_VERSION = "1.1.7"; // v1.1.7：与小程序端版本号统一（var 声明才会挂到 window 上供底部版本标签读取）
+var APP_VERSION = "1.1.8"; // v1.1.7：与小程序端版本号统一（var 声明才会挂到 window 上供底部版本标签读取）
 const WEEKDAY_NAMES = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
 
 // ---- 通用自绘弹层：确认 / 输入（替代系统 confirm/prompt）----
@@ -2831,8 +2831,9 @@ function renderRecords() {
     const src = s.source || "auto";
     const srcBadge = src === "sim" ? '<span class="tag late">模拟</span>' :
         (src === "manual" ? '<span class="tag in">手动</span>' : (src === "native" ? '<span class="tag in">原生</span>' : ''));
+    const effMin = (cfg.mode === "actual") ? s.rawMinutes : s.minutes; // T7.11#13：状态列与新计费口径对齐
     const status = !s.out ? '<span class="tag in">工作中</span>'
-        : (s.rawMinutes - s.breakMinutes > 0 ? '<span class="tag ok">正常</span>' : '<span class="tag warn">异常</span>');
+        : (effMin - s.breakMinutes > 0 ? '<span class="tag ok">正常</span>' : '<span class="tag warn">异常</span>');
     row.innerHTML = `
       <td>${escapeHtml(dk)}${dk === dateKey(today) ? ' <span style="color:var(--ok)">今天</span>' : ""}</td>
       <td>${srcBadge || '<span class="tag in">自动</span>'}</td>
@@ -4027,6 +4028,17 @@ document.addEventListener("visibilitychange", function() {
     if (getNativePlugin() && getNativePlugin().sqliteLoad) {
       loadFromSQLite().then(function() { renderAll(); }).catch(function() {});
     }
+    // T7.4：回前台检查后台定位服务是否仍在运行
+    if (getNativePlugin() && getNativePlugin().isServiceRunning) {
+      getNativePlugin().isServiceRunning().then(function(r) {
+        if (r && r.running === false && DB.autoCheckIn && !window._svcWarned) {
+          window._svcWarned = true;
+          toast("后台定位服务未运行，自动签到可能失效；请回首页重新点「真实GPS」启动", "warn", 6000);
+        } else if (r && r.running) {
+          window._svcWarned = false;
+        }
+      }).catch(function() {});
+    }
   } catch (e) { Logger.error("visibilitychange reconcile:", e); }
   showAnomalyWarnings();
 });
@@ -4660,7 +4672,7 @@ function initAIChat() {
     const bindCode = "BIND_" + Date.now() + "_" + Math.random().toString(36).substr(2, 6).toUpperCase();
     const bindData = {
       deviceId: cloudSyncState.deviceId,
-      deviceName: navigator.userAgent?.match(/\(([^)]+)\)/)?.[1] || "Android设备",
+      deviceName: (function () { var m = navigator.userAgent && navigator.userAgent.match(/\(([^)]+)\)/); return (m && m[1]) || "Android设备"; })(),
       platform: "apk",
       bindCode: bindCode,
       createdAt: Date.now()
@@ -5009,7 +5021,7 @@ function initAIChat() {
       container.innerHTML = `
         <div class="cloud-status online">
           <span class="cloud-dot"></span>
-          <span>已绑定微信 (${cloudSyncState.openid?.substr(0, 8)}...)</span>
+          <span>已绑定微信 (${(cloudSyncState.openid || "").substr(0, 8)}...)</span>
           <button class="fbtn" id="btn-sync-now">立即同步</button>
           <button class="fbtn" id="btn-unbind">解绑</button>
         </div>
@@ -5178,7 +5190,7 @@ function initAIChat() {
     });
 
     // 版本号展示（供应用商店截图与自查）
-    var v = $("app-ver-label"); if (v) v.textContent = "版本 " + (window.APP_VERSION || "1.1.7");
+    var v = $("app-ver-label"); if (v) v.textContent = "版本 " + (window.APP_VERSION || "1.1.8");
   }
 
   function boot() {
