@@ -1216,6 +1216,15 @@ jobs:
                       }
                       @Override protected void handleOnPause() { super.handleOnPause(); if (mapView != null) mapView.onPause(); }
                       @Override protected void handleOnResume() { super.handleOnResume(); if (mapView != null) mapView.onResume(); }
+                      private void emitMapClick(LatLng point) {
+                          try {
+                              if (point == null) return;
+                              JSObject data = new JSObject();
+                              data.put("lat", point.latitude);
+                              data.put("lng", point.longitude);
+                              notifyListeners("mapClick", data);
+                          } catch (Exception ex) { Log.e(TAG, "map click: " + ex.getMessage()); }
+                      }
                       @PluginMethod
                       public void initializeMap(PluginCall call) {
                           getActivity().runOnUiThread(() -> {
@@ -1238,6 +1247,29 @@ jobs:
                                   webViewParent.addView(mapContainer, 0);
                                   baiduMap = mapView.getMap();
                                   baiduMap.setMyLocationEnabled(false);
+                                  // v117：工作地红标可拖动；拖完把新坐标回传 JS（此前 draggable=false，界面提示"可拖拽"实际拖不动）
+                                  baiduMap.setOnMarkerDragListener(new BaiduMap.OnMarkerDragListener() {
+                                      @Override public void onMarkerDrag(com.baidu.mapapi.map.Marker marker) {}
+                                      @Override public void onMarkerDragStart(com.baidu.mapapi.map.Marker marker) {}
+                                      @Override public void onMarkerDragEnd(com.baidu.mapapi.map.Marker marker) {
+                                          try {
+                                              if (workMarker != null && marker != null && marker == workMarker) {
+                                                  LatLng p = marker.getPosition();
+                                                  JSObject data = new JSObject();
+                                                  data.put("lat", p.latitude);
+                                                  data.put("lng", p.longitude);
+                                                  notifyListeners("workMarkerDragEnd", data);
+                                              }
+                                          } catch (Exception ex) { Log.e(TAG, "marker drag end: " + ex.getMessage()); }
+                                      }
+                                  });
+                                  // v117：点击地图选点（回传 BD09 坐标，由 JS 换算 WGS84）
+                                  baiduMap.setOnMapClickListener(new BaiduMap.OnMapClickListener() {
+                                      public void onMapClick(LatLng point) { emitMapClick(point); }
+                                      public void onMapPoiClick(com.baidu.mapapi.map.MapPoi poi) {
+                                          try { if (poi != null) emitMapClick(poi.getPosition()); } catch (Exception ex) { }
+                                      }
+                                  });
                                   LatLng center = new LatLng(lat, lng);
                                   MapStatus mapStatus = new MapStatus.Builder().target(center).zoom(zoom).build();
                                   baiduMap.setMapStatus(MapStatusUpdateFactory.newMapStatus(mapStatus));
@@ -1322,9 +1354,23 @@ jobs:
                                   LatLng position = new LatLng(lat, lng);
                                   if (workMarker != null) workMarker.remove();
                                   BitmapDescriptor icon = BitmapDescriptorFactory.fromResource(android.R.drawable.ic_menu_mylocation);
-                                  OverlayOptions markerOptions = new MarkerOptions().position(position).icon(icon).title(title).draggable(false);
+                                  OverlayOptions markerOptions = new MarkerOptions().position(position).icon(icon).title(title).draggable(true);
                                   workMarker = (com.baidu.mapapi.map.Marker) baiduMap.addOverlay(markerOptions);
                                   JSObject result = new JSObject(); result.put("success", true); call.resolve(result);
+                              } catch (Exception e) { call.reject("Failed: " + e.getMessage()); }
+                          });
+                      }
+                      @PluginMethod
+                      public void getMapCenter(PluginCall call) {
+                          getActivity().runOnUiThread(() -> {
+                              try {
+                                  if (baiduMap == null) { call.reject("Map not initialized"); return; }
+                                  LatLng c = baiduMap.getMapStatus().target;
+                                  JSObject result = new JSObject();
+                                  result.put("success", true);
+                                  result.put("lat", c.latitude);
+                                  result.put("lng", c.longitude);
+                                  call.resolve(result);
                               } catch (Exception e) { call.reject("Failed: " + e.getMessage()); }
                           });
                       }
@@ -1556,7 +1602,7 @@ jobs:
         run: |
           # 应用商店要求：targetSdkVersion >= 34，版本号随每次上架递增。
           VERSION_CODE="${{ vars.RELEASE_VERSION_CODE || github.run_number }}"
-          VERSION_NAME="${{ vars.RELEASE_VERSION_NAME || '1.1.8' }}"
+          VERSION_NAME="${{ vars.RELEASE_VERSION_NAME || '1.1.9' }}"
           GRADLE="android/app/build.gradle"
           if [ -f "$GRADLE" ]; then
             if grep -q "versionCode" "$GRADLE"; then
