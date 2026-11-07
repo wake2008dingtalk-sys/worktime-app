@@ -181,6 +181,7 @@ main{padding:14px;max-width:720px;margin:0 auto;padding-bottom:80px}
     ellipsis}
 /* v1.1.9：粗粒度候选（行政区级）标记 */
 .sug-item .sug-warn{color:#fbbf24;font-size:10px;font-weight:500;margin-left:6px;white-space:nowrap}
+.sug-item .sug-hit{color:#22d3ee;font-size:10px;font-weight:600;margin-left:6px;white-space:nowrap}
 .fbtn.primary{background:linear-gradient(135deg,#0891b2,#22d3ee);color:#04141f;border:none}
 .switch{position:relative;width:38px;height:21px;border-radius:99px;background:var(--line2);transition:.2s;flex:
     0 0 auto}
@@ -743,7 +744,7 @@ main{padding:14px;max-width:720px;margin:0 auto;padding-bottom:80px}
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
         <button class="fbtn" id="btn-privacy">📄 隐私政策</button>
         <button class="fbtn" id="btn-terms">📄 用户协议</button>
-        <span id="app-ver-label" style="color:var(--faint);font-size:12px">版本 1.1.9</span>
+        <span id="app-ver-label" style="color:var(--faint);font-size:12px">版本 1.1.10</span>
       </div>
     </div>
     <div class="set-row">
@@ -1777,7 +1778,7 @@ function resetDB() {
 }
 
 /* ===================== v3 功能实现（任务书第 4/5/7 批）===================== */
-var APP_VERSION = "1.1.9"; // v1.1.9：修复工作地定位——①拒绝行政区级(城市/区县)坐标入库 ②「设为当前位置」主动取新鲜GPS ③原生地图红标/围栏跟随工作地变更 ④红标可拖拽回写坐标 ⑤修正原生地图WGS84/BD09坐标偏移
+var APP_VERSION = "1.1.10"; // v1.1.10：修复搜索无响应——①云函数返回体解包错位导致云路径从不生效 ②识别百度"天配额超限"并立即提示 ③搜索加12秒超时+按钮"搜索中"状态 ④同名匹配防止采纳别家公司坐标 ⑤搜索结果缓存降低配额消耗 ⑥输入联想防抖300→500ms、门槛2→3字；v1.1.9：修复工作地定位——①拒绝行政区级(城市/区县)坐标入库 ②「设为当前位置」主动取新鲜GPS ③原生地图红标/围栏跟随工作地变更 ④红标可拖拽回写坐标 ⑤修正原生地图WGS84/BD09坐标偏移
 const WEEKDAY_NAMES = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
 
 // ---- 通用自绘弹层：确认 / 输入（替代系统 confirm/prompt）----
@@ -3762,7 +3763,32 @@ function hideSugList() {
   if (el) el.style.display = "none";
 }
 
-function renderSugList(items) {
+/* v1.1.10：候选名称与查询词的匹配度。
+   百度 suggestion 是模糊匹配：搜「南通兴东实业」返回的可能是
+   「东帝兴实业股份有限公司」「南通兴东叶片科技有限公司」等**别家**。
+   若自动采纳第一条，就会把别家公司的坐标存成工作地点（真机表现为红标落在苏州）。
+
+   这里**只认真正的同名关系**，不做宽松的字符相似度匹配 ——
+   实测字符重叠算法会把「南通一德实业有限公司」判成 80 分（超过阈值），
+   仍会误采纳别家，因此改为：
+     · 完全相同                       → 100 分（直接采纳）
+     · 一方是另一方的完整前缀/后缀    → 90 分（同一家公司的分支写法，如「XX机场」vs「XX机场T3」）
+     · 其余（仅部分字符重合）         → 一律 0 分，必须由用户手动从候选里选
+   这样「南通一德实业有限公司」等别家绝不会被自动采纳。 */
+function placeNameScore(query, name) {
+  const q = String(query || "").trim();
+  const n = String(name || "").trim();
+  if (!q || !n) return 0;
+  if (q === n) return 100;
+  // 前缀/后缀关系：同一家公司/场所的不同写法
+  if (n.indexOf(q) === 0 || q.indexOf(n) === 0) return 90;
+  if (n.indexOf(q) >= 0 || q.indexOf(n) >= 0) return 80;
+  return 0;
+}
+// 自动采纳的最低分。低于此分说明"这家公司的同名 POI 没搜到"，必须让用户手动选。
+const PLACE_AUTO_PICK_MIN_SCORE = 75;
+
+function renderSugList(items, query) {
   const el = $("#place-sug-list");
   if (!el) return;
   _placeSugItems = items;
@@ -3771,8 +3797,11 @@ function renderSugList(items) {
     /* v1.1.9：粗粒度（行政区级）候选加提示，避免用户点了却被 D1 闸门拒绝却不知原因 */
     const lv = derivePlaceLevel(it);
     const tag = lv ? '<span class="sug-warn">仅到' + escapeHtml(lv) + '级</span>' : "";
+    /* v1.1.10：同名候选打「名称匹配」标记，让用户一眼看出哪条才是自己要找的 */
+    const score = query ? placeNameScore(query, it.name) : 0;
+    const nameTag = score >= PLACE_AUTO_PICK_MIN_SCORE ? '<span class="sug-hit">名称匹配</span>' : "";
     return '<div class="sug-item" data-sug-idx="' + i + '">'
-      + '<div class="sug-name">' + escapeHtml(it.name) + tag + '</div>'
+      + '<div class="sug-name">' + escapeHtml(it.name) + nameTag + tag + '</div>'
       + '<div class="sug-addr">' + escapeHtml(it.address || it.district || "") + '</div>'
       + '</div>';
   }).join("");
@@ -3785,27 +3814,100 @@ function renderSugList(items) {
   });
 }
 
+/* v1.1.10 搜索结果缓存：百度 Place API 有「天配额」（实测同一 AK 每分钟被限流约 40%），
+   而输入联想每敲一个字就会触发一次检索，很容易把配额瞬间打光导致搜索全废。
+   这里按 query 缓存成功结果，命中缓存不再请求云函数，显著降低配额消耗。 */
+const _placeCache = Object.create(null);
+const PLACE_CACHE_MAX = 40;
+function placeCacheGet(q) {
+  const hit = _placeCache[q];
+  return (hit && hit.items && hit.items.length) ? hit : null;
+}
+function placeCacheSet(q, items) {
+  const keys = Object.keys(_placeCache);
+  if (keys.length >= PLACE_CACHE_MAX) delete _placeCache[keys[0]];
+  _placeCache[q] = { items: items, at: Date.now() };
+}
+
+/* v1.1.10：云函数 placeSearch 返回体解包。
+   实测 cloudCall 返回的是 { status, result:[...] }，其中 result 已是数组。
+   原代码 `const data = res.result ? res.result : res` 会多解一层，
+   导致 data 变成数组、data.status 恒为 undefined → 云路径 100% 被跳过，
+   搜索永远走不到云函数（真机表现为「点搜索没反应」）。
+   这里按实际形态解包，并兼容双层包裹的老形态。 */
+function unwrapCloudPlaceResult(res) {
+  if (!res) return null;
+  // 形态 A：{ status, result:[...] }（当前真实形态）
+  if (typeof res.status === "number" && Array.isArray(res.result)) return res;
+  // 形态 B：{ result: { status, result:[...] } }（双层包裹，兼容）
+  if (res.result && typeof res.result === "object" && !Array.isArray(res.result)) {
+    const inner = res.result;
+    if (typeof inner.status === "number" && Array.isArray(inner.result)) return inner;
+  }
+  return null;
+}
+
+// 百度 Place API 配额状态码：302 = 天配额超限（实测会随机命中，与 region 无关）
+function isPlaceQuotaError(status, message) {
+  if (status === 302) return true;
+  const m = String(message || "");
+  return m.indexOf("配额") >= 0 || m.indexOf("quota") >= 0 || m.indexOf("QPS") >= 0;
+}
+
 async function searchPlaceSuggestions(query) {
+  const q = String(query || "").trim();
+  if (!q) return { ok: false, items: [], message: "查询为空" };
+
+  // 命中缓存直接返回，不再消耗云函数配额
+  const cached = placeCacheGet(q);
+  if (cached) return { ok: true, items: cached.items, status: 0, via: "cache" };
+
   // T6.2：优先走 CloudBase 云函数代理（服务端 AK 只存在云函数环境变量里）
+  let quotaHit = false;
   try {
     if (window.CloudSync && typeof window.CloudSync.cloudCall === "function") {
-      const res = await window.CloudSync.cloudCall("placeSearch", { query: query, region: "全国" });
-      const data = (res && res.result) ? res.result : res;
+      const res = await window.CloudSync.cloudCall("placeSearch", { query: q, region: "全国" });
+      const data = unwrapCloudPlaceResult(res);
       if (data && data.status === 0 && Array.isArray(data.result)) {
         const items = data.result.filter(function(it) {
           return it.location && Math.abs(it.location.lat) > 0.01 && Math.abs(it.location.lng) > 0.01;
         });
-        if (items.length) return { ok: true, items: items, status: 0, via: "cloud" };
+        if (items.length) {
+          placeCacheSet(q, items);
+          return { ok: true, items: items, status: 0, via: "cloud" };
+        }
+        return { ok: false, items: [], status: 0, message: "未找到匹配的地点" };
       }
+      if (data && isPlaceQuotaError(data.status, data.message)) quotaHit = true;
+      if (!data && res && isPlaceQuotaError(res.status, res.message)) quotaHit = true;
     }
   } catch (e) { Logger.warn("cloud placeSearch failed, fallback to direct:", e); }
+
+  /* v1.1.10：配额被打满时立刻返回并告知用户，不再原地等重试。
+     实测百度「天配额超限」在配额窗口内是稳定失败的，等下去只会让用户对着
+     「正在搜索…」的 toast 白等好几秒（真机表现就是"点了没反应"）。
+     缓存已有结果时照常可用。 */
+  if (quotaHit) {
+    return {
+      ok: false, items: [],
+      quotaHit: true,
+      message: "百度检索服务今日配额已用尽，请稍后再试"
+    };
+  }
+
   /* v1.1.9 D5：直连回退只认「服务端」AK。
      现有 BAIDU_MAP_AK 是 APP/浏览器端类型，用它调 Place Web 服务必然返回 240「APP 服务被禁用」，
      之前把 BAIDU_MAP_AK 也当回退 AK，导致必然失败的请求 + 误导性的报错文案。
      服务端检索请部署 placeSearch 云函数（其环境变量里放服务端 AK）。 */
   const ak = BAIDU_PLACE_AK;
-  if (!ak || ak === "YOUR_AK_HERE") return { ok: false, items: null, message: "服务端检索未配置（请部署 placeSearch 云函数）" };
-  const url = "https://api.map.baidu.com/place/v2/suggestion?query=" + encodeURIComponent(query)
+  if (!ak || ak === "YOUR_AK_HERE") {
+    return {
+      ok: false, items: [],
+      quotaHit: quotaHit,
+      message: quotaHit ? "百度检索服务今日配额已用尽，请稍后再试" : "服务端检索未配置（请部署 placeSearch 云函数）"
+    };
+  }
+  const url = "https://api.map.baidu.com/place/v2/suggestion?query=" + encodeURIComponent(q)
     + "&region=" + encodeURIComponent("全国")
     + "&output=json&ak=" + encodeURIComponent(ak);
   const data = await baiduJsonp(url);
@@ -3817,6 +3919,7 @@ async function searchPlaceSuggestions(query) {
   const items = data.result.filter(function(it) {
     return it.location && Math.abs(it.location.lat) > 0.01 && Math.abs(it.location.lng) > 0.01;
   });
+  if (items.length) placeCacheSet(q, items);
   return { ok: true, items: items, status: 0, via: "direct" };
 }
 
@@ -3894,21 +3997,28 @@ function selectPlaceSuggestion(item) {
 }
 
 // v109：输入防抖，实时出候选下拉
+/* v1.1.10：防抖从 300ms 提到 500ms，并把输入长度门槛从 2 提到 3。
+   实测百度 Place API 有「天配额」（同一 AK 约 40% 的请求被限流），
+   每敲一个字就发一次请求会把配额瞬间打光，反而让搜索全废。
+   「南通兴东实业有限公司」这类公司名，一般要打到 3 个字才有意义。 */
 $("#search-place-name").addEventListener("input", function() {
   const q = this.value.trim();
   clearTimeout(_placeSugTimer);
-  if (q.length < 2) { hideSugList(); _placeSugItems = []; return; }
+  if (q.length < 3) { hideSugList(); _placeSugItems = []; return; }
   _placeSugTimer = setTimeout(async () => {
     const seq = ++_placeSugSeq;
     try {
       const res = await searchPlaceSuggestions(q);
       if (seq !== _placeSugSeq) return; // 已有更新的输入，丢弃旧响应
-      if (res && res.items) renderSugList(res.items);
+      /* v1.1.10：配额耗尽时不再反复空跑，直接静默收起下拉，
+         用户点「搜索并设置」时才会看到明确的配额提示。 */
+      if (res && res.quotaHit) { hideSugList(); return; }
+      if (res && res.items) renderSugList(res.items, q);
     } catch (e) {
       Logger.error("suggestion error:", e);
       if (seq === _placeSugSeq) hideSugList();
     }
-  }, 300);
+  }, 500);
 });
 $("#search-place-name").addEventListener("blur", function() {
   setTimeout(hideSugList, 250); // 延迟隐藏，让候选 click 先触发
@@ -3921,26 +4031,65 @@ $("#btn-search-place").addEventListener("click", async () => {
   const name = $("#search-place-name").value.trim();
   if (!name) { toast("请输入公司或地址名称", "warn"); return; }
   hideSugList();
-  /* v1.1.9：优先挑一个"精确到 POI"的候选，避免第一条恰好是行政区质心时直接被 D1 闸门拒绝 */
-  function pickBest(items) {
+  /* v1.1.10：自动采纳前必须校验"名称确实匹配"。
+     百度模糊匹配会返回别家公司（如搜「南通兴东实业」返回「东帝兴实业股份有限公司」），
+     直接采纳第一条会把别家的坐标存成工作地点 —— 红标落在错误的位置。
+     规则：名称完全同名/高度相似（≥75 分）才自动采纳；
+           否则把候选列出来让用户自己点，避免"设置到了别家公司"。 */
+  function pickAuto(items) {
     if (!items || !items.length) return null;
+    let best = null, bestScore = -1;
     for (let i = 0; i < items.length; i++) {
-      if (!derivePlaceLevel(items[i])) return items[i];
+      if (derivePlaceLevel(items[i])) continue;          // 跳过行政区级
+      const s = placeNameScore(name, items[i].name);
+      if (s > bestScore) { bestScore = s; best = items[i]; }
     }
-    return items[0];
+    if (best && bestScore >= PLACE_AUTO_PICK_MIN_SCORE) return best;
+    return null;
   }
   // v109：优先复用已展示的候选第一项（用户看过列表后再点按钮的场景）
-  if (_placeSugItems.length) { selectPlaceSuggestion(pickBest(_placeSugItems)); return; }
+  if (_placeSugItems.length) {
+    const auto = pickAuto(_placeSugItems);
+    if (auto) { selectPlaceSuggestion(auto); return; }
+    // 名称对不上：把候选重新列出来，让用户明确选择要哪一家
+    renderSugList(_placeSugItems, name);
+    toast("没有找到完全同名的地点，请从下方候选中选择", "warn", 4000);
+    return;
+  }
   toast("正在搜索：" + name + "…", "ok");
+  /* v1.1.10：按钮进入"搜索中"状态，给用户明确反馈（真机原先只有 toast，点了像没反应） */
+  const btnSearch = $("#btn-search-place");
+  const btnSearchOldText = btnSearch ? btnSearch.textContent : "";
+  if (btnSearch) { btnSearch.disabled = true; btnSearch.textContent = "搜索中…"; }
   // v109：首选 Place Web API（APK/浏览器通用，公司名 POI 识别准）
   let placeApiError = "";
+  let quotaHit = false;
   try {
-    const res = await searchPlaceSuggestions(name);
-    if (res && res.items && res.items.length) { selectPlaceSuggestion(pickBest(res.items)); return; }
+    /* v1.1.10：加超时保护。原实现里云函数一旦卡住（网络抖动/SDK 挂起），
+       await 永不返回，toast 会永远停在「正在搜索」，用户只看到"没反应"。
+       这里用 Promise.race 兜住，最长等 12 秒。 */
+    const res = await Promise.race([
+      searchPlaceSuggestions(name),
+      new Promise(function(_, reject) {
+        setTimeout(function() { reject(new Error("search timeout")); }, 12000);
+      })
+    ]);
+    if (res && res.items && res.items.length) {
+      const auto = pickAuto(res.items);
+      if (auto) { selectPlaceSuggestion(auto); return; }
+      /* v1.1.10：搜到了候选但没有同名项 —— 不能自动采纳（会把别家公司的坐标存进去），
+         把候选列出来让用户自己点。 */
+      renderSugList(res.items, name);
+      toast("没有找到完全同名的地点，请从下方候选中选择", "warn", 4000);
+      return;
+    }
     if (res && res.message) placeApiError = res.message;
+    if (res && res.quotaHit) quotaHit = true;
   } catch (e) {
     Logger.error("Place API error:", e);
-    placeApiError = "网络异常";
+    placeApiError = (e && e.message === "search timeout") ? "搜索超时" : "网络异常";
+  } finally {
+    if (btnSearch) { btnSearch.disabled = false; btnSearch.textContent = btnSearchOldText || "搜索并设置"; }
   }
   // 兜底：浏览器端 JS API 地理编码（适合"省市区路号"结构化地址）
   if (typeof BMap !== "undefined" && BMap.Geocoder) {
@@ -3966,11 +4115,15 @@ $("#btn-search-place").addEventListener("click", async () => {
   }
   // v109：把百度返回的具体错误透出来，方便定位 AK 配置问题
   let tip = "未找到该地点。";
-  if (placeApiError) tip += "Place API：" + placeApiError + "。";
-  if (placeApiError.indexOf("禁用") >= 0 || placeApiError.indexOf("服务") >= 0) {
-    tip += "服务端检索需要在云函数 placeSearch 的环境变量中配置「服务端」类型 AK。";
+  if (quotaHit) {
+    tip = "百度检索今日配额已用尽，请稍后再试。也可直接在地图上长按选点，或用「把地图中心设为工作地」。";
+  } else {
+    if (placeApiError) tip += "Place API：" + placeApiError + "。";
+    if (placeApiError.indexOf("禁用") >= 0 || placeApiError.indexOf("服务") >= 0) {
+      tip += "服务端检索需要在云函数 placeSearch 的环境变量中配置「服务端」类型 AK。";
+    }
+    tip += "也可手动输入经纬度，或在地图上拖拽红标选点。";
   }
-  tip += "也可手动输入经纬度，或在地图上拖拽红标选点。";
   toast(tip, "warn", 6000);
 });
 /* v1.1.9 D2：「设为当前位置」在无定位缓存（或缓存超过 30 秒）时，
@@ -5375,7 +5528,7 @@ function initAIChat() {
     });
 
     // 版本号展示（供应用商店截图与自查）
-    var v = $("app-ver-label"); if (v) v.textContent = "版本 " + (window.APP_VERSION || "1.1.9");
+    var v = $("app-ver-label"); if (v) v.textContent = "版本 " + (window.APP_VERSION || "1.1.10");
   }
 
   function boot() {

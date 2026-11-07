@@ -1614,7 +1614,7 @@ jobs:
         run: |
           # 应用商店要求：targetSdkVersion >= 34，版本号随每次上架递增。
           VERSION_CODE="${{ vars.RELEASE_VERSION_CODE || github.run_number }}"
-          VERSION_NAME="${{ vars.RELEASE_VERSION_NAME || '1.1.9' }}"
+          VERSION_NAME="${{ vars.RELEASE_VERSION_NAME || '1.1.10' }}"
           GRADLE="android/app/build.gradle"
           if [ -f "$GRADLE" ]; then
             if grep -q "versionCode" "$GRADLE"; then
