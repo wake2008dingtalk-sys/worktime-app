@@ -300,6 +300,7 @@ jobs:
                    import android.content.ContentValues;
                    public class WorkTimeService extends Service {
                        private static final String TAG = "WorkTimeSvc";
+                       public static volatile boolean running = false; // T7.4：供插件查询前台服务是否存活
                        private static final int NOTIF_ID = 1001;
                        private Handler handler;
                        private Runnable pollRunnable;
@@ -308,6 +309,7 @@ jobs:
                        private android.os.PowerManager.WakeLock wakeLock;
                        @Override public void onCreate() {
                            super.onCreate();
+                           running = true;
                            handler = new Handler(Looper.getMainLooper());
                            locHelper = new LocationHelper(this);
                            // Acquire a partial wake lock to keep CPU running in Doze mode
@@ -523,6 +525,7 @@ jobs:
                         @Override public IBinder onBind(Intent intent) { return null; }
                         @Override public void onDestroy() {
                            super.onDestroy();
+                           running = false;
                            if (pollRunnable != null) handler.removeCallbacks(pollRunnable);
                            locHelper.stop();
                            if (wakeLock != null && wakeLock.isHeld()) {
@@ -569,7 +572,7 @@ jobs:
                            PendingIntent pi = PendingIntent.getBroadcast(ctx, 0, alarmIntent, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
                            // v108: 唤醒间隔读取轮询配置（至少 60s），原硬编码 60s 高频硬唤醒耗电
                            android.content.SharedPreferences sp = ctx.getSharedPreferences("worktime_prefs", Context.MODE_PRIVATE);
-                           long interval = Math.max(sp.getInt("poll_interval_ms", 300000), 60000);
+                           long interval = Math.max(sp.getInt("poll_interval_ms", 30000), 60000);
                            long nextTrigger = SystemClock.elapsedRealtime() + interval;
                            // v110: 精确闹钟未授权（Android 14 默认不授予 SCHEDULE_EXACT_ALARM）时降级为非精确闹钟；
                            // 任何异常都不能从 BroadcastReceiver 主线程冒出，否则直接崩溃。
@@ -769,6 +772,12 @@ jobs:
                           ret.put("error", e.getMessage());
                           call.resolve(ret);
                       }
+                  }
+                  @PluginMethod
+                  public void isServiceRunning(PluginCall call) {
+                      JSObject ret = new JSObject();
+                      ret.put("running", WorkTimeService.running);
+                      call.resolve(ret);
                   }
                   @PluginMethod
                   public void startService(PluginCall call) {
@@ -1556,7 +1565,7 @@ jobs:
         run: |
           # 应用商店要求：targetSdkVersion >= 34，版本号随每次上架递增。
           VERSION_CODE="${{ vars.RELEASE_VERSION_CODE || github.run_number }}"
-          VERSION_NAME="${{ vars.RELEASE_VERSION_NAME || '1.1.7' }}"
+          VERSION_NAME="${{ vars.RELEASE_VERSION_NAME || '1.1.8' }}"
           GRADLE="android/app/build.gradle"
           if [ -f "$GRADLE" ]; then
             if grep -q "versionCode" "$GRADLE"; then
