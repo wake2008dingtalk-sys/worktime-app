@@ -3864,9 +3864,21 @@ async function searchPlaceSuggestions(query) {
 
   // T6.2：优先走 CloudBase 云函数代理（服务端 AK 只存在云函数环境变量里）
   let quotaHit = false;
+  let cloudTimeout = false;
   try {
     if (window.CloudSync && typeof window.CloudSync.cloudCall === "function") {
-      const res = await window.CloudSync.cloudCall("placeSearch", { query: q, region: "全国" });
+      /* v1.1.10：云函数调用加超时保护。
+         实测未登录云开发（或云函数不可达）时，CloudSync.cloudCall 不会 reject，
+         而是永远挂起 —— 于是「搜索并设置」按钮虽然有 12 秒 race 兜底，
+         但输入联想那条路径直接 await searchPlaceSuggestions，没有兜底，
+         会一直占着一个 pending promise，候选框再也不出现。
+         这里把超时下沉到云函数调用处，所有调用点统一受保护。 */
+      const res = await Promise.race([
+        window.CloudSync.cloudCall("placeSearch", { query: q, region: "全国" }),
+        new Promise(function(_, reject) {
+          setTimeout(function() { reject(new Error("cloud call timeout")); }, 10000);
+        })
+      ]);
       const data = unwrapCloudPlaceResult(res);
       if (data && data.status === 0 && Array.isArray(data.result)) {
         const items = data.result.filter(function(it) {
@@ -3881,7 +3893,10 @@ async function searchPlaceSuggestions(query) {
       if (data && isPlaceQuotaError(data.status, data.message)) quotaHit = true;
       if (!data && res && isPlaceQuotaError(res.status, res.message)) quotaHit = true;
     }
-  } catch (e) { Logger.warn("cloud placeSearch failed, fallback to direct:", e); }
+  } catch (e) {
+    if (e && e.message === "cloud call timeout") cloudTimeout = true;
+    Logger.warn("cloud placeSearch failed, fallback to direct:", e);
+  }
 
   /* v1.1.10：配额被打满时立刻返回并告知用户，不再原地等重试。
      实测百度「天配额超限」在配额窗口内是稳定失败的，等下去只会让用户对着
@@ -3892,6 +3907,16 @@ async function searchPlaceSuggestions(query) {
       ok: false, items: [],
       quotaHit: true,
       message: "百度检索服务今日配额已用尽，请稍后再试"
+    };
+  }
+
+  /* v1.1.10：云函数超时（未登录云开发 / 云函数不可达）时给出明确说明，
+     不再笼统报"未配置"，让用户知道该做什么。 */
+  if (cloudTimeout) {
+    return {
+      ok: false, items: [],
+      timeout: true,
+      message: "检索服务响应超时（云开发可能未登录或云函数未部署），请改用地图选点或拖拽红标设置工作地"
     };
   }
 
@@ -4008,7 +4033,14 @@ $("#search-place-name").addEventListener("input", function() {
   _placeSugTimer = setTimeout(async () => {
     const seq = ++_placeSugSeq;
     try {
-      const res = await searchPlaceSuggestions(q);
+      /* v1.1.10：联想路径也加超时。云函数不可达时 searchPlaceSuggestions 可能很慢，
+         这里最多等 12 秒，超时静默收起下拉，绝不让候选框"卡住不动"。 */
+      const res = await Promise.race([
+        searchPlaceSuggestions(q),
+        new Promise(function(_, reject) {
+          setTimeout(function() { reject(new Error("suggest timeout")); }, 12000);
+        })
+      ]);
       if (seq !== _placeSugSeq) return; // 已有更新的输入，丢弃旧响应
       /* v1.1.10：配额耗尽时不再反复空跑，直接静默收起下拉，
          用户点「搜索并设置」时才会看到明确的配额提示。 */
