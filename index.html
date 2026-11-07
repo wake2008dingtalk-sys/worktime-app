@@ -659,14 +659,6 @@ main{padding:14px;max-width:720px;margin:0 auto;padding-bottom:80px}
       <input id="set-lat" type="text" placeholder="纬度" style="width:100px">
       <input id="set-lng" type="text" placeholder="经度" style="width:100px">
     </div>
-    <div class="set-row" style="margin-top:2px">
-      <label></label>
-      <span id="wp-distance-hint" style="color:var(--faint);font-size:11px;line-height:1.6"></span>
-    </div>
-    <div class="set-row" style="margin-top:2px">
-      <label></label>
-      <span id="cur-pos-hint" style="color:var(--faint);font-size:11px;line-height:1.6"></span>
-    </div>
     <div class="set-row" style="margin-top:4px;gap:4px">
       <label style="min-width:auto;color:var(--faint);font-size:12px">微调</label>
       <button class="fbtn" id="nudge-n" title="向北移10米">↑北</button>
@@ -678,10 +670,6 @@ main{padding:14px;max-width:720px;margin:0 auto;padding-bottom:80px}
     <div class="set-row" style="margin-top:4px">
       <button class="fbtn primary" id="save-place">保存地点</button>
       <button class="fbtn" id="place-here">设为当前位置</button>
-    </div>
-    <div class="set-row" style="margin-top:4px;flex-wrap:wrap;gap:6px">
-      <button class="fbtn primary" id="map-center-place">📌 把地图中心设为工作地</button>
-      <span style="color:var(--faint);font-size:11px">先到地图页把目标拖到屏幕中心，再点这里</span>
     </div>
     <div class="set-row" style="margin-top:4px;flex-wrap:wrap;gap:8px">
       <label>数据</label>
@@ -752,7 +740,7 @@ main{padding:14px;max-width:720px;margin:0 auto;padding-bottom:80px}
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
         <button class="fbtn" id="btn-privacy">📄 隐私政策</button>
         <button class="fbtn" id="btn-terms">📄 用户协议</button>
-        <span id="app-ver-label" style="color:var(--faint);font-size:12px">版本 1.2.0</span>
+        <span id="app-ver-label" style="color:var(--faint);font-size:12px">版本 1.1.7</span>
       </div>
     </div>
     <div class="set-row">
@@ -1786,7 +1774,7 @@ function resetDB() {
 }
 
 /* ===================== v3 功能实现（任务书第 4/5/7 批）===================== */
-var APP_VERSION = "1.2.0"; // v1.2.0：一键「我就在工作地」主动取新鲜GPS重设工作地（不再依赖可能为空的缓存定位），设置页实时显示当前定位坐标/精度/时间
+var APP_VERSION = "1.1.7"; // v1.1.7：与小程序端版本号统一（var 声明才会挂到 window 上供底部版本标签读取）
 const WEEKDAY_NAMES = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
 
 // ---- 通用自绘弹层：确认 / 输入（替代系统 confirm/prompt）----
@@ -2168,7 +2156,6 @@ function checkAppVersion() {
 
 /* ===================== 全局状态 ===================== */
 let lastPos = null;
-let lastPosAt = 0; // v120：记录最近一次定位时间，用于判断坐标是否新鲜
 let watchId = null, simInt = null, locMode = null, bgGeoWatch = null;
 let mapZoom = 18, mapCenter = { lat: DB.workPlace.lat, lng: DB.workPlace.lng };
 let isDragging = false, dragStart = null, mapCenterStart = null;
@@ -2285,42 +2272,6 @@ function smartReminder() {
 }
 
 /* ===================== 地图初始化 ===================== */
-/* v117：原生地图事件回调——拖红标 / 点地图，实时把 BD09 换成 WGS84 写回本地 */
-function bindNativeMapEvents() {
-  const NP = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.BaiduMap;
-  if (!NP || !NP.addListener || window._wpMapEventsBound) return;
-  window._wpMapEventsBound = true;
-
-  function applyNativePoint(bdLat, bdLng, tip) {
-    const wgs = bd09ToWgs84(bdLat, bdLng);
-    DB.workPlace = { lat: wgs.lat, lng: wgs.lng, name: (DB.workPlace && DB.workPlace.name) || "工作地点" };
-    if (!saveDB()) { toast("保存失败：本地存储受限，请用导出备份", "bad"); return; }
-    const a = $("#set-lat"), b = $("#set-lng");
-    if (a) a.value = wgs.lat.toFixed(6);
-    if (b) b.value = wgs.lng.toFixed(6);
-    updateMapWorkPlace(wgs.lat, wgs.lng);
-    renderAll();
-    toast(tip, "ok");
-  }
-
-  try {
-    const h1 = NP.addListener("workMarkerDragEnd", function (ev) {
-      try { applyNativePoint(ev.lat, ev.lng, "工作地点已更新到拖动后的位置"); }
-      catch (e) { Logger.error("drag handler:", e); }
-    });
-    const h2 = NP.addListener("mapClick", function (ev) {
-      try {
-        const wgs = bd09ToWgs84(ev.lat, ev.lng);
-        const d = lastPos ? haversine(lastPos.lat, lastPos.lng, wgs.lat, wgs.lng) : -1;
-        const ask = "把工作地点设为这个位置吗？" + (d >= 0 ? "\n（距您当前定位约 " + (d >= 1000 ? (d / 1000).toFixed(1) + " 公里" : Math.round(d) + " 米") + "）" : "");
-        if (window.confirm(ask)) applyNativePoint(ev.lat, ev.lng, "工作地点已设为点击的位置");
-      } catch (e) { Logger.error("map click handler:", e); }
-    });
-    const store = function (h) { if (h && h.then) h.then(function (x) { window._wpMapHandles = [x]; }).catch(function () {}); else window._wpMapHandles = [h]; };
-    store(h1); store(h2);
-  } catch (e) { Logger.warn("bindNativeMapEvents failed:", e); }
-}
-
 // v65: 百度地图 Android 原生 SDK（APK端）/ JS API（浏览器端）
 function initMap() {
   const isNativeApp = !!(window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.BaiduMap);
@@ -2349,7 +2300,6 @@ function initMap() {
       }).then(() => {
         // 标记原生地图已就绪
         bmapReady = true;
-        bindNativeMapEvents();
         toast("百度地图已加载", "ok");
       }).catch(e => {
         Logger.error("Native map init failed:", e);
@@ -3022,7 +2972,6 @@ function renderSettings() {
     if (ae !== $("#set-place-name")) $("#set-place-name").value = DB.workPlace.name || "";
   if (ae !== $("#set-lat")) $("#set-lat").value = DB.workPlace.lat.toFixed(6);
   if (ae !== $("#set-lng")) $("#set-lng").value = DB.workPlace.lng.toFixed(6);
-  updateWorkPlaceHint();
   if (ae !== $("#auto-check-in")) $("#auto-check-in").checked = DB.autoCheckIn !== false;
   const pm = DB.powerMode || "standard";
   $("#mode-standard").classList.toggle("primary", pm === "standard");
@@ -3385,7 +3334,6 @@ function applyPos(pos, mode) {
     Logger.warn("定位精度不足，跳过围栏检测:", pos.acc, "米");
   }
   lastPos = { lat: pos.lat, lng: pos.lng, acc: pos.acc };
-  lastPosAt = Date.now();
   if (mode === "gps") $("#btn-gps").textContent = "📡 GPS 中";
   if (bmap) { const bd = wgs84ToBd09Point(pos.lat, pos.lng); bmap.panTo(bd); }
   updatePosMarker();
@@ -3643,11 +3591,6 @@ $("#dlg-break-daily").addEventListener("click",
 $("#save-place").addEventListener("click", () => {
   const lat = parseFloat($("#set-lat").value), lng = parseFloat($("#set-lng").value);
   if (isNaN(lat) || isNaN(lng)) { toast("请输入有效经纬度", "warn"); return; }
-  /* v116：拦掉纬度经度写反（写反后位置会跑到境外/海里，表现为"偏了几百公里"） */
-  if (lat < 3 || lat > 54 || lng < 73 || lng > 136) {
-    toast("坐标不像国内位置，请确认「纬度在前、经度在后」，纬度约 3~54、经度约 73~136", "warn", 6000);
-    return;
-  }
   DB.workPlace = { lat, lng, name: DB.workPlace.name || "工作地点" };
   if (!saveDB()) { toast("保存失败：浏览器限制了本地存储，请尝试更换浏览器或使用导出数据功能备份", "bad"); return; }
   updateMapWorkPlace(lat, lng);
@@ -3656,49 +3599,7 @@ $("#save-place").addEventListener("click", () => {
 });
 
 /* 输入框联动地图：经纬度变化时自动更新标记位置 */
-/* v116：工作地点「距您多远」提示——城市级质心/输错坐标一眼可见 */
-function updateWorkPlaceHint() {
-  const el = document.getElementById("wp-distance-hint");
-  if (!el) return;
-  const lat = parseFloat($("#set-lat").value);
-  const lng = parseFloat($("#set-lng").value);
-  if (isNaN(lat) || isNaN(lng)) { el.textContent = ""; return; }
-  if (!lastPos) {
-    el.textContent = "定位未开启，无法比对距离（打开定位后可校验是否设错）";
-    el.style.color = "var(--faint)";
-    const cp0 = document.getElementById("cur-pos-hint");
-    if (cp0) cp0.textContent = "当前定位：未获取——请先在首页点「📡 真实GPS」启动定位";
-    return;
-  }
-  const cp = document.getElementById("cur-pos-hint");
-  if (cp) {
-    const age = lastPosAt ? Math.round((Date.now() - lastPosAt) / 1000) : -1;
-    const ageTxt = age < 0 ? "" : (age < 60 ? age + " 秒前" : Math.round(age / 60) + " 分钟前");
-    cp.textContent = "当前定位：" + lastPos.lat.toFixed(6) + ", " + lastPos.lng.toFixed(6) +
-      "（精度约 " + Math.round(lastPos.acc || 0) + " 米" + (ageTxt ? "，更新于 " + ageTxt : "") + "）";
-  }
-  const d = haversine(lastPos.lat, lastPos.lng, lat, lng);
-  const txt = d >= 1000 ? (d / 1000).toFixed(1) + " 公里" : Math.round(d) + " 米";
-  let msg = "距您当前位置：" + txt;
-  if (d > 30000) msg += "　⚠️ 距离过远，很可能设错了（城市中心/输错坐标）";
-  el.textContent = msg;
-  el.style.color = d > 30000 ? "var(--bad)" : (d > 1000 ? "#fbbf24" : "var(--faint)");
-}
-
 function updateMapWorkPlace(lat, lng) {
-  /* v116：APK 端地图是原生百度 SDK，bmap 恒为 null。
-     此前这里直接跳过 → 改完工作地后地图上红标/围栏仍停在旧位置，看着像"定位不准"。
-     原生插件 addWorkMarker / drawFence 都会先移除旧覆盖物，可安全重复调用。 */
-  const NP = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.BaiduMap;
-  if (NP) {
-    const wpTitle = (DB.workPlace && DB.workPlace.name) || "工作地点";
-    try {
-      if (NP.setCenter) { try { NP.setCenter({ lat: lat, lng: lng }); } catch (e0) {} }
-      NP.addWorkMarker({ lat: lat, lng: lng, title: wpTitle }).catch(function () {});
-      NP.drawFence({ lat: lat, lng: lng, radius: DB.fenceRadius || 200 }).catch(function () {});
-    } catch (e) { Logger.error("native work place update failed:", e); }
-    return;
-  }
   if (bmap && workMarker && rangeCircle) {
     try {
       const bd = wgs84ToBd09Point(lat, lng);
@@ -3844,30 +3745,12 @@ async function searchPlaceSuggestions(query) {
   return { ok: true, items: items, status: 0, via: "direct" };
 }
 
-function applySearchedPlace(name, bdLat, bdLng, level) {
+function applySearchedPlace(name, bdLat, bdLng) {
   const wgs = bd09ToWgs84(bdLat, bdLng);
   const lat = wgs.lat, lng = wgs.lng;
   if (Math.abs(lat) < 0.01 || Math.abs(lng) < 0.01) {
     toast("搜索返回的坐标无效，请手动设置位置", "bad");
     return false;
-  }
-  /* v116 精度闸门：地理编码降级时只返回行政区质心（level=城市/区县），
-     历史上就是把"南通市质心"当成了公司位置，导致工作地偏几十上百公里。 */
-  const LOW_LEVELS = ["国家", "省份", "城市", "区县", "城镇", "村庄", "乡镇", "道路"];
-  if (level && LOW_LEVELS.indexOf(level) >= 0) {
-    toast("只匹配到「" + level + "」级位置，精度不够，不能作为工作地。请在地图上点击或拖拽红标选具体位置", "warn", 6000);
-    return false;
-  }
-  /* v116 距离闸门：离当前定位超过 30 公里必须二次确认（默认取消） */
-  if (lastPos) {
-    const dist = haversine(lastPos.lat, lastPos.lng, lat, lng);
-    if (dist > 30000) {
-      const ask = "该地点距您当前位置约 " + (dist / 1000).toFixed(1) + " 公里。\n\n如果不是您的实际工作地，说明搜索匹配错了（同名不同城、或只匹配到城市中心）。\n\n仍要设为工作地点吗？";
-      if (!window.confirm(ask)) {
-        toast("已取消，工作地点未改动", "warn");
-        return false;
-      }
-    }
   }
   Logger.debug("Place result for", name, ": BD09(", bdLat, bdLng, ") -> WGS84(", lat, lng, ")");
   DB.workPlace = { lat, lng, name: name };
@@ -3937,7 +3820,7 @@ $("#btn-search-place").addEventListener("click", async () => {
     const geo = new BMap.Geocoder();
     geo.getPoint(name, function(point) {
       if (point) {
-        applySearchedPlace(name, point.lat, point.lng, point.level);
+        applySearchedPlace(name, point.lat, point.lng);
       } else {
         toast("未找到该地址，请尝试更具体的名称或手动输入经纬度", "warn");
       }
@@ -3953,72 +3836,20 @@ $("#btn-search-place").addEventListener("click", async () => {
   tip += "也可手动输入经纬度。";
   toast(tip, "warn", 6000);
 });
-$("#place-here").addEventListener("click", () => { setWorkPlaceToCurrent(); });
-
-/* v120：一键「我就在工作地」——主动取一次新鲜高精度定位，不再依赖可能为空/过期的 lastPos */
-function commitCurrentAsWorkPlace(p) {
-  $("#set-lat").value = p.lat.toFixed(6);
-  $("#set-lng").value = p.lng.toFixed(6);
-  DB.workPlace = { lat: p.lat, lng: p.lng, name: DB.workPlace.name || "工作地点" };
+$("#place-here").addEventListener("click", () => {
+  if (!lastPos) { toast("请先启动定位", "warn"); return; }
+  $("#set-lat").value = lastPos.lat.toFixed(6);
+  $("#set-lng").value = lastPos.lng.toFixed(6);
+  DB.workPlace = { lat: lastPos.lat, lng: lastPos.lng, name: DB.workPlace.name || "工作地点" };
   saveDB();
-  updateMapWorkPlace(p.lat, p.lng);
+  if (bmap && workMarker) {
+    const bd = wgs84ToBd09Point(lastPos.lat, lastPos.lng);
+    workMarker.setPosition(bd);
+    rangeCircle.setCenter(bd);
+    updateWorkLabel();
+  }
   renderAll();
-  toast("已把当前位置设为工作地点（精度约 " + Math.round(p.acc || 0) + " 米）", "ok", 4000);
-}
-async function setWorkPlaceToCurrent() {
-  // 30 秒内的鲜活定位直接用
-  if (lastPos && lastPosAt && (Date.now() - lastPosAt) < 30000) {
-    commitCurrentAsWorkPlace(lastPos);
-    return;
-  }
-  if (!navigator.geolocation) { toast("设备不支持定位", "bad"); return; }
-  toast("正在获取当前位置，请稍候…", "ok", 3000);
-  try {
-    const pos = await new Promise(function (resolve, reject) {
-      navigator.geolocation.getCurrentPosition(resolve, reject,
-        { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 });
-    });
-    const p = { lat: pos.coords.latitude, lng: pos.coords.longitude, acc: pos.coords.accuracy };
-    lastPos = p; lastPosAt = Date.now();
-    commitCurrentAsWorkPlace(p);
-  } catch (err) {
-    if (err && err.code === 1) {
-      toast("定位权限被拒绝，请先在系统设置中允许本应用定位", "bad", 6000);
-      if (window.confirm("定位权限未开启。是否前往系统设置开启？")) {
-        try {
-          if (window.BackgroundGeolocation && window.BackgroundGeolocation.openSettings) window.BackgroundGeolocation.openSettings();
-          else window.location.href = "intent:#Intent;action=android.settings.APPLICATION_DETAILS_SETTINGS;package=com.worktime.tracker;end";
-        } catch (e) {}
-      }
-    } else if (err && err.code === 3) {
-      toast("定位超时：请到空旷处、或先在首页点「📡 真实GPS」启动定位后再试；也可以改用下方「把地图中心设为工作地」", "bad", 7000);
-    } else {
-      toast("定位失败：" + ((err && err.message) || "未知错误") + "。可改用「把地图中心设为工作地」手动设置", "bad", 7000);
-    }
-  }
-}
-
-/* v117：把地图当前中心点设为工作地（不依赖 GPS，适合定位漂移/不在现场时使用） */
-$("#map-center-place").addEventListener("click", async () => {
-  const NP = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.BaiduMap;
-  if (!NP || !NP.getMapCenter) {
-    toast("该功能仅 APK 端可用；浏览器端请直接点击地图选点", "warn", 5000);
-    return;
-  }
-  try {
-    const r = await NP.getMapCenter();
-    if (!r || typeof r.lat !== "number") { toast("获取地图中心失败", "bad"); return; }
-    const wgs = bd09ToWgs84(r.lat, r.lng);
-    DB.workPlace = { lat: wgs.lat, lng: wgs.lng, name: DB.workPlace.name || "工作地点" };
-    if (!saveDB()) { toast("保存失败", "bad"); return; }
-    $("#set-lat").value = wgs.lat.toFixed(6);
-    $("#set-lng").value = wgs.lng.toFixed(6);
-    updateMapWorkPlace(wgs.lat, wgs.lng);
-    renderAll();
-    toast("已把地图中心设为工作地点", "ok");
-  } catch (e) {
-    toast("获取地图中心失败：" + (e && e.message ? e.message : e), "bad");
-  }
+  toast("已设为当前位置", "ok");
 });
 
 /* 定位微调 */
@@ -4030,7 +3861,12 @@ function nudgeWorkPlace(dir, meters) {
   else if (dir === "w") DB.workPlace.lng -= deltaDeg;
   $("#set-lat").value = DB.workPlace.lat.toFixed(6);
   $("#set-lng").value = DB.workPlace.lng.toFixed(6);
-  updateMapWorkPlace(DB.workPlace.lat, DB.workPlace.lng);
+  if (bmap && workMarker) {
+    const bd = wgs84ToBd09Point(DB.workPlace.lat, DB.workPlace.lng);
+    workMarker.setPosition(bd);
+    rangeCircle.setCenter(bd);
+    updateWorkLabel();
+  }
   renderAll();
 }
 $("#nudge-n").addEventListener("click", () => nudgeWorkPlace("n", 10));
@@ -5342,7 +5178,7 @@ function initAIChat() {
     });
 
     // 版本号展示（供应用商店截图与自查）
-    var v = $("app-ver-label"); if (v) v.textContent = "版本 " + (window.APP_VERSION || "1.2.0");
+    var v = $("app-ver-label"); if (v) v.textContent = "版本 " + (window.APP_VERSION || "1.1.7");
   }
 
   function boot() {
