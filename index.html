@@ -3829,6 +3829,7 @@ const COARSE_PLACE_LEVELS = ["国家", "省份", "城市", "区县", "城镇", "
 // 由行政区名后缀反推精度等级（"南通市"→城市，"崇川区"→区县，"刘桥镇"→城镇）
 function levelFromName(name) {
   const s = String(name || "");
+  if (/^(中国|中华人民共和国|全国)$/.test(s)) return "国家";
   if (/省$/.test(s)) return "省份";
   if (/市$/.test(s)) return "城市";
   if (/(区|县)$/.test(s)) return "区县";
@@ -3845,10 +3846,12 @@ function derivePlaceLevel(item) {
   const name = String(item.name || "").trim();
   const parts = String(item.address || "").split("-").map(function(s) { return s.trim(); }).filter(Boolean);
   const last = parts.length ? parts[parts.length - 1] : "";
-  // 结果名 == 地址末段 ⇒ 结果就是这个行政区本身（省/市/区县/乡镇/村庄）
+  // 结果名 == 地址末段 ⇒ 结果就是这个行政区本身（省/市/区县/乡镇/村庄/国家）
   if (name && last && name === last) return levelFromName(name);
+  // 地址只有 1 段（如"江苏省"）⇒ 连区县都没到，精度更差
+  if (parts.length === 1) return levelFromName(last) || "省份";
   // 地址只到省/市/区县两级 ⇒ 精度不足（至少到道路才算可用）
-  if (parts.length && parts.length <= 2) return levelFromName(last) || "城市";
+  if (parts.length === 2) return levelFromName(last) || "城市";
   // 名称是乡镇/村庄、地址末段却只是普通道路 ⇒ 仍是乡镇级粗定位
   if (name && /(镇|乡|村)$/.test(name) && /(路|街|道)$/.test(last)) return "城镇";
   return "";
