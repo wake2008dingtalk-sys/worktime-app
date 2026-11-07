@@ -1614,7 +1614,19 @@ jobs:
         run: |
           # 应用商店要求：targetSdkVersion >= 34，版本号随每次上架递增。
           VERSION_CODE="${{ vars.RELEASE_VERSION_CODE || github.run_number }}"
-          VERSION_NAME="${{ vars.RELEASE_VERSION_NAME || '1.1.10' }}"
+          # v1.1.11 修复：原默认值写死 '1.1.10'，而仓库变量 RELEASE_VERSION_NAME 并未设置，
+          # 导致 APK 的 Android 层 versionName 长期停在 1.1.10，与应用内 APP_VERSION 不一致
+          # （设置→应用→WorkTime 里看到的版本号会过期）。
+          # 改为：优先用仓库变量；未设置时自动从 index.html 的 APP_VERSION 读取，二者再也不会漂移。
+          VERSION_NAME="${{ vars.RELEASE_VERSION_NAME }}"
+          if [ -z "$VERSION_NAME" ]; then
+            VERSION_NAME=$(grep -oE 'var APP_VERSION = "[^"]+"' index.html | head -1 | sed 's/.*"\(.*\)"/\1/')
+          fi
+          if [ -z "$VERSION_NAME" ]; then
+            VERSION_NAME="1.1.11"
+            echo "WARNING: 未能从 index.html 解析 APP_VERSION，回落到 $VERSION_NAME"
+          fi
+          echo "versionName = $VERSION_NAME (source: ${VARS_SRC:-auto})"
           GRADLE="android/app/build.gradle"
           if [ -f "$GRADLE" ]; then
             if grep -q "versionCode" "$GRADLE"; then
