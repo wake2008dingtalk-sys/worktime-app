@@ -1,6 +1,6 @@
 // 网页版 Service Worker（子路径 /app/ 部署；APK 内不注册 SW）
 // v1.1.10：升级缓存名，强制清掉 v1.1.5/v1.1.7 老缓存，避免旧版 PWA 卡在老版本
-const CACHE_NAME = 'worktime-web-v7';
+const CACHE_NAME = 'worktime-web-v8';
 const ASSETS = ['./', './index.html'];
 
 self.addEventListener('install', e => {

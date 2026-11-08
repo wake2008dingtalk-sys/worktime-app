@@ -1289,20 +1289,31 @@ function computeShifts(records, dayStart, dayEnd, breakMinutes, cfgOverride) {
   const nowMs = Date.now();
   inRs.forEach(rIn => {
     if (!pairedIn.has(rIn.time)) {
+      /* v1.1.13：未签退的班次不再一刀切按整班计。
+         原实现 shift 模式直接给「班次时长 − 午休」，于是上午刚签到、
+         还没到下班时间就已经拿到 11h30m 满额工时，看起来就是"工时算多了"。
+         现在：还没到下班时间 → 只计「从上班到此刻」；已过下班时间 →
+         才按整班结算（视为正常出勤但忘记签退）。 */
+      const nowCap = Math.min(nowMs, dayEnd);
       const softEnd = effMode === "actual"
-        ? Math.min(setEndMs, dayEnd, Math.max(nowMs, rIn.time))
-        : Math.min(setEndMs, dayEnd);
+        ? Math.min(setEndMs, dayEnd, Math.max(nowCap, rIn.time))
+        : Math.min(setEndMs, dayEnd, Math.max(nowCap, rIn.time));
       let minutes, rawMin;
+      /* 起算点取「班次开始」与「实际签到」的较晚者：
+         迟到的人不能从班次开始时刻起算，否则未签退期间每小时都在虚增工时。 */
+      const calcStart = Math.min(Math.max(setStartMs, rIn.time), softEnd);
+      rawMin = Math.max(0, (softEnd - calcStart) / 60000);
+      const stillOpen = nowCap < setEndMs;          // 还没到下班时间
       if (effMode === "actual") {
-        rawMin = Math.max(0, (softEnd - rIn.time) / 60000);
-        minutes = Math.max(0, rawMin - breakMin);
+        minutes = Math.max(0, (softEnd - rIn.time) / 60000 - breakMin);
       } else {
-        const calcStart = Math.min(setStartMs, softEnd);
-        rawMin = Math.max(0, (softEnd - calcStart) / 60000);
-        minutes = Math.max(0, setMin - breakMin);
+        minutes = stillOpen
+          ? Math.max(0, rawMin - breakMin)          // 未到下班：按已出勤计
+          : Math.max(0, setMin - breakMin);         // 已过下班：按整班计
       }
-      shifts.push({ in: rIn.time, out: softEnd, minutes, rawMinutes: rawMin, breakMinutes: breakMin, distIn:
-          rIn.dist || null, distOut: null });
+      shifts.push({ in: rIn.time, out: stillOpen ? null : softEnd, minutes,
+          rawMinutes: rawMin, breakMinutes: breakMin,
+          distIn: rIn.dist || null, distOut: null, open: stillOpen });
     }
   });
   const sorted = shifts.sort((a, b) => a.in - b.in);
@@ -1791,7 +1802,7 @@ function resetDB() {
 }
 
 /* ===================== v3 功能实现（任务书第 4/5/7 批）===================== */
-var APP_VERSION = "1.1.12"; // v1.1.12：未到工作区禁止任何签到记录操作——新增 checkRecordGate() 统一闸门（工作地已设置+定位有效+定位≤60秒新鲜+在围栏内），接入 addRecord/doCheck/补录三处；签退不再"随处可签"；补录改存真实坐标；v1.1.11：云函数调用超时保护（未登录云开发/云函数不可达时搜索不再永久挂起）；v1.1.10：修复搜索无响应——①云函数返回体解包错位导致云路径从不生效 ②识别百度"天配额超限"并立即提示 ③搜索加12秒超时+按钮"搜索中"状态 ④同名匹配防止采纳别家公司坐标 ⑤搜索结果缓存降低配额消耗 ⑥输入联想防抖300→500ms、门槛2→3字；v1.1.9：修复工作地定位——①拒绝行政区级(城市/区县)坐标入库 ②「设为当前位置」主动取新鲜GPS ③原生地图红标/围栏跟随工作地变更 ④红标可拖拽回写坐标 ⑤修正原生地图WGS84/BD09坐标偏移
+var APP_VERSION = "1.1.13"; // v1.1.13：修复工时/休息日/周期班次——①周期班次与单日班次保存时休息日不再被丢弃（勾「休」可不填时间）②00:00 被 falsy 误判为非法的所有校验改为 == null 判断（零点班可用）③休息日不再产生金额（概览/记录列表/月度统计全部不计薪，且不进月收入合计）④未签退的班次不再预付整班工时（未到下班时间只计已出勤时长）；v1.1.12：未到工作区禁止任何签到记录操作——新增 checkRecordGate() 统一闸门（工作地已设置+定位有效+定位≤60秒新鲜+在围栏内），接入 addRecord/doCheck/补录三处；签退不再"随处可签"；补录改存真实坐标；v1.1.11：云函数调用超时保护（未登录云开发/云函数不可达时搜索不再永久挂起）；v1.1.10：修复搜索无响应——①云函数返回体解包错位导致云路径从不生效 ②识别百度"天配额超限"并立即提示 ③搜索加12秒超时+按钮"搜索中"状态 ④同名匹配防止采纳别家公司坐标 ⑤搜索结果缓存降低配额消耗 ⑥输入联想防抖300→500ms、门槛2→3字；v1.1.9：修复工作地定位——①拒绝行政区级(城市/区县)坐标入库 ②「设为当前位置」主动取新鲜GPS ③原生地图红标/围栏跟随工作地变更 ④红标可拖拽回写坐标 ⑤修正原生地图WGS84/BD09坐标偏移
 const WEEKDAY_NAMES = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
 
 // ---- 通用自绘弹层：确认 / 输入（替代系统 confirm/prompt）----
@@ -2008,22 +2019,32 @@ function saveShiftEditor() {
   const dk = $("#se-date").value;
   if (!dk) { toast("请选择日期", "warn"); return; }
   const start = $("#se-start").value, end = $("#se-end").value;
-  if (!parseHM(start) || !parseHM(end)) { toast("上下班时间格式不正确", "warn"); return; }
+  const off = $("#se-off").checked;
+  /* v1.1.13：休息日允许不填上下班时间。
+     原实现无条件要求 start/end 合法，导致「休息日」根本存不进去（要么填假时间）。
+     另：原判断用 !parseHM(x)，而 00:00 解析结果是 0（falsy），零点班次也会被误判非法，
+     这里统一改成 == null 判断。 */
+  if (!off) {
+    if (parseHM(start) == null || parseHM(end) == null) {
+      toast("非休息日请填写上下班时间（HH:MM）", "warn");
+      return;
+    }
+  }
   const baseCfg = dayConfigOf(dk);
   DB.dayConfigMap[dk] = {
-    start: start,
-    end: end,
+    start: start || null,
+    end: end || null,
     breakMin: Math.max(0, parseInt($("#se-break").value, 10) || 0),
     rate: (baseCfg.rate != null ? baseCfg.rate : DB.payRate),
     mode: $("#se-mode").value || "shift",
-    off: $("#se-off").checked,
+    off: off,
     frozen: dk < dateKey(new Date())
   };
   if (!saveDB()) { toast("保存失败", "bad"); return; }
   syncNativeSettings();
   renderAll();
   $("#dlg-shift-editor").classList.remove("show");
-  toast("已保存 " + dk + " 的班次", "ok");
+  toast("已保存 " + dk + " 的班次" + (off ? "（休息日：不计工时与金额）" : ""), "ok");
 }
 
 // ---- 周期班次（按周几）----
@@ -2044,23 +2065,34 @@ function renderWeekdayList() {
 }
 function saveWeekdayRules() {
   const rules = {};
+  let skipped = [];
   document.querySelectorAll("#weekday-list .wd-row").forEach(function(row) {
     if (!row.querySelector(".wd-en").checked) return;
     const wd = row.dataset.wd;
     const s = row.querySelector(".wd-start").value;
     const e = row.querySelector(".wd-end").value;
     const b = row.querySelector(".wd-break").value;
-    if (!parseHM(s) || !parseHM(e)) return;
+    const off = row.querySelector(".wd-off").checked;
+    /* v1.1.13：休息日允许只勾「休」不填时间。
+       原实现一律要求 start/end 合法（且用 falsy 判断，00:00 也算非法），
+       休息日那一行会被静默丢弃 → 周期班次/休息日设置保存后完全没效果。 */
+    if (!off) {
+      if (parseHM(s) == null || parseHM(e) == null) { skipped.push(WEEKDAY_NAMES[wd]); return; }
+    }
     rules[wd] = {
-      start: s,
-      end: e,
+      start: s || null,
+      end: e || null,
       breakMin: b === "" ? (parseInt(DB.dailyBreakMinutes) || 0) : Math.max(0, parseInt(b) || 0),
-      off: row.querySelector(".wd-off").checked
+      off: off
     };
   });
+  if (skipped.length) {
+    toast(skipped.join("、") + " 未填完整上下班时间，已跳过（休息日请勾「休」）", "warn", 6000);
+  }
   if (!changeWeekdayRules(rules)) { toast("保存失败", "bad"); return; }
   $("#dlg-weekday").classList.remove("show");
-  toast("周期班次已保存（历史已锁定）", "ok");
+  const cnt = Object.keys(rules).length;
+  toast("周期班次已保存：" + cnt + " 天规则生效（历史已锁定）", "ok", 4000);
 }
 
 // ---- 趋势图（纯 Canvas）----
@@ -2867,8 +2899,9 @@ function renderOverview() {
     if (lateMin > 1 || lateMin < -1) subText += `（实到 ${fmtTime(firstIn.time)}）`;
   }
   $("#ov-hours-sub").textContent = subText;
-  $("#ov-pay").textContent = fmtMoney(pay);
-  $("#ov-pay-sub").textContent = "@ ¥" + rateVal + "/时 · " + modeLabel;
+  // v1.1.13：休息日不产生薪资（原实现会把当天分钟数折算成金额显示出来）
+  $("#ov-pay").textContent = cfg.off ? "休·不计薪" : fmtMoney(pay);
+  $("#ov-pay-sub").textContent = cfg.off ? "休息日不计薪" : ("@ ¥" + rateVal + "/时 · " + modeLabel);
   $("#ov-progress").textContent = cfg.off ? (minutes > 0 ? "休·出勤" : "休息日") : progress + "%";
   $("#ov-target").textContent = cfg.off ? "休息日 · 不计目标" : "目标 " + fmtDurShort(targetMin);
 
@@ -2940,7 +2973,8 @@ function renderRecords() {
         : escapeHtml(billOut) + '<br><span style="color:var(--acc);font-size:11px">实 ' + escapeHtml(fmtTime(s.out)) + '</span>';
     }
     const hours = (s.minutes / 60).toFixed(1);
-    const income = fmtMoney((s.minutes / 60) * rateVal);
+    // v1.1.13：休息日的记录不折算金额
+    const income = cfg.off ? "休·不计薪" : fmtMoney((s.minutes / 60) * rateVal);
     const src = s.source || "auto";
     const srcBadge = src === "sim" ? '<span class="tag late">模拟</span>' :
         (src === "manual" ? '<span class="tag in">手动</span>' : (src === "native" ? '<span class="tag in">原生</span>' : ''));
@@ -3020,14 +3054,18 @@ function renderStats() {
       const shifts = computeShifts(DB.records, dStart, dEnd, breakMin);
       const dayMinutesTotal = shifts.reduce((s, x) => s + x.minutes, 0);
       const dayHours = dayMinutesTotal / 60;
-      const income = dayHours * rateVal;
+      /* v1.1.13：休息日不计金额。
+         原实现只要当天有打卡就算钱，导致「休」标记的日子照样进月收入，
+         用户看到的就是"休息日还有金额记录"。现在休息日一律 0 金额，
+         且不计入月度收入合计（工时仍照实显示，便于看当天出勤了多久）。 */
+      const income = cfg.off ? 0 : dayHours * rateVal;
       const completion = targetHours > 0 ? Math.round((dayHours / targetHours) * 100) : 0;
       const hasSign = shifts.length > 0;
       const isToday = dk === dateKey(today);
       
       if (hasSign) {
         monthTotalHours += dayHours;
-        monthTotalIncome += income;
+        if (!cfg.off) monthTotalIncome += income;   // v1.1.13：休息日不进月收入
         monthWorkDays++;
       }
       
@@ -3035,7 +3073,7 @@ function renderStats() {
         <td class="date-cell">${dk}${isToday ? ' <span style="color:var(--ok);font-size:10px">今天</span>' : ""}${cfg.off ? ' <span style="color:var(--faint);font-size:10px">休</span>' : ""}</td>
         <td class="hours-cell">${hasSign ? dayHours.toFixed(1) + 'h' : '<span style="color:var(--faint)">—</span>'}</td>
         <td>${breakMin}min</td>
-        <td class="money-cell">${hasSign ? fmtMoney(income) : '<span style="color:var(--faint)">—</span>'}</td>
+        <td class="money-cell">${cfg.off ? '<span style="color:var(--faint)">休·不计薪</span>' : (hasSign ? fmtMoney(income) : '<span style="color:var(--faint)">—</span>')}</td>
         <td>${cfg.off ? '休' : targetHours + 'h'}</td>
         <td><span class="tag ${cfg.off ? 'in' : (completion >= 100 ? 'ok' : (completion >= 80 ? 'warn' : 'late'))}">${cfg.off ? '休' : completion + '%'}</span></td>
         <td>${hasSign ? `<button class="fbtn edit-btn" data-action="edit-shift" data-dk="${dk}" style="padding:2px 6px;font-size:10px">修改</button>` : '<span style="color:var(--faint)">—</span>'}</td>
@@ -3305,8 +3343,10 @@ function refreshAfterEdit() {
   })();
   $("#ov-hours").textContent = fmtDurShort(minutes);
   $("#ov-hours-sub").textContent = subText;
-  $("#ov-pay").textContent = fmtMoney(pay);
-  $("#ov-pay-sub").textContent = "@ ¥" + DB.payRate + "/时";
+  // v1.1.13：休息日不产生薪资（与 renderOverview 口径保持一致）
+  const _cfgToday = dayConfigOf(dateKey(new Date()));
+  $("#ov-pay").textContent = _cfgToday.off ? "休·不计薪" : fmtMoney(pay);
+  $("#ov-pay-sub").textContent = _cfgToday.off ? "休息日不计薪" : ("@ ¥" + DB.payRate + "/时");
   $("#ov-progress").textContent = progress + "%";
   $("#ov-target").textContent = "目标 " + fmtDurShort(targetMin);
   $("#pg-bar").style.width = progress + "%";
@@ -3569,7 +3609,7 @@ $("#save-fence").addEventListener("click", () => {
 });
 $("#save-start").addEventListener("click", () => {
   const v = $("#set-start").value;
-  if (!parseHM(v)) { toast("请输入有效的上班时间（HH:MM）", "warn"); return; }
+  if (parseHM(v) == null) { toast("请输入有效的上班时间（HH:MM）", "warn"); return; }
   // T3.2：默认值变更走 changeDefaults（先冻结历史再应用新值）
   if (!changeDefaults({ dailyStartTime: v })) {
     toast("保存失败：浏览器限制了本地存储，请尝试更换浏览器或使用导出数据功能备份", "bad"); return;
@@ -3578,7 +3618,7 @@ $("#save-start").addEventListener("click", () => {
 });
 $("#save-end").addEventListener("click", () => {
   const v = $("#set-end").value;
-  if (!parseHM(v)) { toast("请输入有效的下班时间（HH:MM）", "warn"); return; }
+  if (parseHM(v) == null) { toast("请输入有效的下班时间（HH:MM）", "warn"); return; }
   if (!changeDefaults({ dailyEndTime: v })) {
     toast("保存失败：浏览器限制了本地存储，请尝试更换浏览器或使用导出数据功能备份", "bad"); return;
   }
