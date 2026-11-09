@@ -851,6 +851,11 @@ main{padding:14px;max-width:720px;margin:0 auto;padding-bottom:80px}
         <span style="color:var(--faint);font-size:11.5px">保留时分，重算该日班次</span>
       </div>
       <div class="set-row" style="margin-bottom:6px;flex-wrap:wrap;gap:8px">
+        <label style="min-width:64px">改类型</label>
+        <button class="fbtn" id="dm-as-in">设为上班</button>
+        <button class="fbtn" id="dm-as-out">设为下班</button>
+      </div>
+      <div class="set-row" style="margin-bottom:6px;flex-wrap:wrap;gap:8px">
         <label style="min-width:64px">删除/恢复</label>
         <button class="fbtn" id="dm-del" style="color:var(--bad)">🗑 删除所选</button>
         <button class="fbtn" id="dm-restore">♻ 恢复所选</button>
@@ -5196,6 +5201,23 @@ async function dmMoveDate() {
   toast("已改期到 " + dk, "ok");
 }
 
+// ---- 改类型（补录把上/下班弄反时用）----
+async function dmSetType(nt) {
+  var t = dmTargets();
+  if (!t.length) { toast("没有可修改的记录（请先筛选或勾选）", "warn"); return; }
+  var ch = t.filter(function(r) { return r.type !== nt; });
+  if (!ch.length) { toast("所选记录已经都是「" + (nt === "in" ? "上班" : "下班") + "」", "warn"); return; }
+  var ok = await customConfirm("修改打卡类型",
+      "将 " + dmTargetLabel(ch.length) + " 改为「" + (nt === "in" ? "上班" : "下班") + "」。"
+      + "同一天可能出现两条同类型记录，工时按时间顺序配对，改完请核对统计。", "确认修改");
+  if (!ok) return;
+  dmSnapshot("改类型为" + (nt === "in" ? "上班" : "下班") + " " + ch.length + " 条");
+  var now = Date.now();
+  ch.forEach(function(r) { r.type = nt; r.updatedAt = now; });
+  dmAfterWrite();
+  toast("已改为" + (nt === "in" ? "上班" : "下班") + " " + ch.length + " 条", "ok");
+}
+
 // ---- 批量补录 ----
 function dmDateRange(from, to) {
   var out = [];
@@ -5351,6 +5373,8 @@ $("#dm-restore").addEventListener("click", dmRestore);
 $("#dm-shift-apply").addEventListener("click", dmShiftMinutes);
 $("#dm-set-time-apply").addEventListener("click", dmSetTime);
 $("#dm-move-apply").addEventListener("click", dmMoveDate);
+$("#dm-as-in").addEventListener("click", function() { dmSetType("in"); });
+$("#dm-as-out").addEventListener("click", function() { dmSetType("out"); });
 $("#dm-add-apply").addEventListener("click", dmBatchAdd);
 $("#dm-purge").addEventListener("click", dmPurge);
 $("#dm-clear").addEventListener("click", dmClearAll);
