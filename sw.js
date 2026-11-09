@@ -1,19 +1,35 @@
-const CACHE_NAME = 'worktime-v4';
+// v1.1: 缓存名带版本号；移除跨域百度地图脚本（旧 AK 已轮换，且跨域 addAll 会让 install 失败）
+const CACHE_NAME = 'worktime-v6';
 const ASSETS = [
   '/',
-  '/index.html',
-  'https://api.map.baidu.com/api?v=3.0&ak=JqOK6BELzHU0SGk8WDnURxZZTU44x20G'
+  '/index.html'
 ];
 
 self.addEventListener('install', e => {
+  // 逐个资源 add 并吞掉单个失败：任一资源 404 / 跨域失败都不阻塞 Service Worker 安装
   e.waitUntil(
-    caches.open(CACHE_NAME).then(cache => cache.addAll(ASSETS))
+    caches.open(CACHE_NAME).then(cache =>
+      Promise.all(ASSETS.map(url =>
+        cache.add(url).catch(err => {
+          console.warn('[SW] skip precache: ' + url, err);
+        })
+      ))
+    )
   );
   self.skipWaiting();
 });
 
 self.addEventListener('activate', e => {
-  e.waitUntil(self.clients.claim());
+  // 清理旧版本缓存（只清理 worktime- 前缀，避免误删同源其他缓存）
+  e.waitUntil(
+    caches.keys()
+      .then(keys => Promise.all(
+        keys
+          .filter(key => key.indexOf('worktime-') === 0 && key !== CACHE_NAME)
+          .map(key => caches.delete(key))
+      ))
+      .then(() => self.clients.claim())
+  );
 });
 
 self.addEventListener('fetch', e => {
