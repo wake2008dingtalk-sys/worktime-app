@@ -1076,6 +1076,44 @@ function cfgTimesFor(dk, cfg) {
   }
   return { startMs, endMs, setMin, startStr: cfg.start || fmtTime(startMs), endStr };
 }
+
+/* ===================== v1.1.14：记录级配置快照 =====================
+   需求：设置里任何一项改动，都绝对不能影响已有记录（含当天已结束的班次）。
+   问题：原先 computeShifts 对整天只取一份「当天实时配置」，于是改上下班时间/时薪/
+        午休/计薪方式，今天已经签退结束的班次会跟着变 —— 工时和金额被倒改。
+   做法：记录产生时把当时的生效配置写进记录的 cfg 字段；
+        计算时优先用记录自带的 cfg，只有老记录才回落到当天配置。
+        这样「设置只影响之后新产生的记录」，历史与已结束班次永久冻结。 */
+function _cfgForRecord(db, dk) {
+  db = db || DB;
+  if (db && db.dayConfigMap && db.dayConfigMap[dk]) return db.dayConfigMap[dk];
+  return _liveConfigFor(db, dk);
+}
+function recordCfgSnapshot(dk, db) {
+  db = db || DB;
+  const c = _cfgForRecord(db, dk || dateKey(new Date()));
+  return {
+    start: c.start != null ? c.start : null,
+    end: c.end != null ? c.end : null,
+    breakMin: Math.max(0, parseInt(c.breakMin) || 0),
+    rate: (c.rate != null ? c.rate : (db.payRate || 0)),
+    mode: c.mode || "shift",
+    off: !!c.off
+  };
+}
+// 给缺少 cfg 的旧记录补快照（一次性，只加字段不改任何已存在的值）
+function backfillRecordCfg(db) {
+  db = db || DB;
+  if (!db || !Array.isArray(db.records)) return 0;
+  let n = 0;
+  db.records.forEach(function(r) {
+    if (!r || r.cfg && typeof r.cfg === "object") return;
+    const dk = r.dateKey || dateKey(new Date(r.time));
+    r.cfg = recordCfgSnapshot(dk, db);
+    n++;
+  });
+  return n;
+}
 // 一次性迁移：把"有记录的历史日"固化为快照（只固化旧口径，不改写任何记录）
 function migrateToV3(db) {
   db = db || DB;
@@ -1231,6 +1269,9 @@ function normalizeDB(d) {
   if (d.workPlace && !d.workPlace.name) d.workPlace.name = "苏州市";
   // v3：升级时给"有记录的历史日"固化账面快照（不改写任何记录）
   migrateToV3(d);
+  /* v1.1.14：给没有配置快照的旧记录补一份，从此设置改动不再倒改历史。
+     必须在 migrateToV3 之后——那时历史日快照已就绪，补出来的值才是当时口径。 */
+  backfillRecordCfg(d);
   return d;
 }
 // v107修复：有效记录视图（过滤软删除墓碑）
@@ -1262,6 +1303,26 @@ function computeShifts(records, dayStart, dayEnd, breakMinutes, cfgOverride) {
   const targetMin = Math.max(0, Math.round(setMin - breakMin));
   // T5.3：休息日默认按"实际在场"计（跳过未配对补全），工时=实际在场−午休
   const effMode = cfg.off ? "actual" : cfg.mode;
+
+  /* v1.1.14：按记录自带的配置快照解析该班次的口径。
+     有快照 → 完全按快照算（设置改动影响不到已产生的记录）；
+     无快照（极老数据）→ 回落到当天配置。 */
+  function ctxOf(rec) {
+    const snap = (rec && rec.cfg && typeof rec.cfg === "object") ? rec.cfg : null;
+    if (!snap) {
+      return { t: t, brk: breakMin, mode: effMode,
+               rate: (cfg.rate != null ? cfg.rate : (DB.payRate || 0)), off: !!cfg.off, snap: null };
+    }
+    const tt = cfgTimesFor(dayKey, snap);
+    return {
+      t: tt,
+      brk: Math.max(0, parseInt(snap.breakMin) || 0),
+      mode: snap.off ? "actual" : (snap.mode || "shift"),
+      rate: (snap.rate != null ? snap.rate : (DB.payRate || 0)),
+      off: !!snap.off,
+      snap: snap
+    };
+  }
   // v107修复：过滤软删除记录；下班记录按序消费，避免多个上班配对同一个下班（双计工时）
   // v111fix10：下班记录窗口扩至次日6小时——跨午夜班次的下班打卡落在次日
   const inRs = records.filter(r => !r.deleted && r.time >= dayStart && r.time < dayEnd && r.type === "in").sort((a,
@@ -1275,13 +1336,16 @@ function computeShifts(records, dayStart, dayEnd, breakMinutes, cfgOverride) {
     const out = outRs[outIdx];
     if (out) {
       outIdx++; // 消费该下班记录：同一天第二个上班不会再配到它
+      const k = ctxOf(rIn);            // v1.1.14：用上班记录自带的配置快照
       const rawMin = Math.max(0, (out.time - rIn.time) / 60000);
       // shift=方案A（按设置班次，早到/晚退不增减）；actual=按实际时长（加班如实体现）
-      const minutes = effMode === "actual"
-        ? Math.max(0, rawMin - breakMin)
-        : Math.max(0, setMin - breakMin);
-      shifts.push({ in: rIn.time, out: out.time, minutes, rawMinutes: rawMin, breakMinutes: breakMin, distIn:
-          rIn.dist || null, distOut: out.dist || null });
+      const minutes = k.mode === "actual"
+        ? Math.max(0, rawMin - k.brk)
+        : Math.max(0, k.t.setMin - k.brk);
+      shifts.push({ in: rIn.time, out: out.time, minutes, rawMinutes: rawMin, breakMinutes: k.brk,
+          distIn: rIn.dist || null, distOut: out.dist || null,
+          rate: k.rate, mode: k.mode, off: k.off,
+          startStr: k.t.startStr, endStr: k.t.endStr, setStartMs: k.t.startMs, setEndMs: k.t.endMs });
     }
   });
   // 未配对的上班记录：shift 模式用设置下班时间补全；actual 模式算到 min(现在, 设置下班)
@@ -1294,26 +1358,27 @@ function computeShifts(records, dayStart, dayEnd, breakMinutes, cfgOverride) {
          还没到下班时间就已经拿到 11h30m 满额工时，看起来就是"工时算多了"。
          现在：还没到下班时间 → 只计「从上班到此刻」；已过下班时间 →
          才按整班结算（视为正常出勤但忘记签退）。 */
+      const k = ctxOf(rIn);                        // v1.1.14：用记录自带快照
       const nowCap = Math.min(nowMs, dayEnd);
-      const softEnd = effMode === "actual"
-        ? Math.min(setEndMs, dayEnd, Math.max(nowCap, rIn.time))
-        : Math.min(setEndMs, dayEnd, Math.max(nowCap, rIn.time));
+      const softEnd = Math.min(k.t.endMs, dayEnd, Math.max(nowCap, rIn.time));
       let minutes, rawMin;
       /* 起算点取「班次开始」与「实际签到」的较晚者：
          迟到的人不能从班次开始时刻起算，否则未签退期间每小时都在虚增工时。 */
-      const calcStart = Math.min(Math.max(setStartMs, rIn.time), softEnd);
+      const calcStart = Math.min(Math.max(k.t.startMs, rIn.time), softEnd);
       rawMin = Math.max(0, (softEnd - calcStart) / 60000);
-      const stillOpen = nowCap < setEndMs;          // 还没到下班时间
-      if (effMode === "actual") {
-        minutes = Math.max(0, (softEnd - rIn.time) / 60000 - breakMin);
+      const stillOpen = nowCap < k.t.endMs;        // 还没到下班时间
+      if (k.mode === "actual") {
+        minutes = Math.max(0, (softEnd - rIn.time) / 60000 - k.brk);
       } else {
         minutes = stillOpen
-          ? Math.max(0, rawMin - breakMin)          // 未到下班：按已出勤计
-          : Math.max(0, setMin - breakMin);         // 已过下班：按整班计
+          ? Math.max(0, rawMin - k.brk)            // 未到下班：按已出勤计
+          : Math.max(0, k.t.setMin - k.brk);       // 已过下班：按整班计
       }
       shifts.push({ in: rIn.time, out: stillOpen ? null : softEnd, minutes,
-          rawMinutes: rawMin, breakMinutes: breakMin,
-          distIn: rIn.dist || null, distOut: null, open: stillOpen });
+          rawMinutes: rawMin, breakMinutes: k.brk,
+          distIn: rIn.dist || null, distOut: null, open: stillOpen,
+          rate: k.rate, mode: k.mode, off: k.off,
+          startStr: k.t.startStr, endStr: k.t.endStr, setStartMs: k.t.startMs, setEndMs: k.t.endMs });
     }
   });
   const sorted = shifts.sort((a, b) => a.in - b.in);
@@ -1780,6 +1845,9 @@ function addRecord(type, pos, source) {
     // v1.1.12：记录判定依据（距工作点米数 / 围栏半径 / 定位新鲜度），便于事后审计
     fenceRadius: gate.radius,
     posAgeMs: lastPosAt ? (now - lastPosAt) : null,
+    /* v1.1.14：固化此刻生效的账面配置。之后无论在设置里怎么改时薪/班次/午休/
+       计薪方式，这条记录（以及它所属班次）的工时与金额都不再变化。 */
+    cfg: recordCfgSnapshot(todayKey),
     source: source || (locMode === "sim" ? "sim" : "auto"),
     updatedAt: now
   };
@@ -1802,7 +1870,7 @@ function resetDB() {
 }
 
 /* ===================== v3 功能实现（任务书第 4/5/7 批）===================== */
-var APP_VERSION = "1.1.13"; // v1.1.13：修复工时/休息日/周期班次——①周期班次与单日班次保存时休息日不再被丢弃（勾「休」可不填时间）②00:00 被 falsy 误判为非法的所有校验改为 == null 判断（零点班可用）③休息日不再产生金额（概览/记录列表/月度统计全部不计薪，且不进月收入合计）④未签退的班次不再预付整班工时（未到下班时间只计已出勤时长）；v1.1.12：未到工作区禁止任何签到记录操作——新增 checkRecordGate() 统一闸门（工作地已设置+定位有效+定位≤60秒新鲜+在围栏内），接入 addRecord/doCheck/补录三处；签退不再"随处可签"；补录改存真实坐标；v1.1.11：云函数调用超时保护（未登录云开发/云函数不可达时搜索不再永久挂起）；v1.1.10：修复搜索无响应——①云函数返回体解包错位导致云路径从不生效 ②识别百度"天配额超限"并立即提示 ③搜索加12秒超时+按钮"搜索中"状态 ④同名匹配防止采纳别家公司坐标 ⑤搜索结果缓存降低配额消耗 ⑥输入联想防抖300→500ms、门槛2→3字；v1.1.9：修复工作地定位——①拒绝行政区级(城市/区县)坐标入库 ②「设为当前位置」主动取新鲜GPS ③原生地图红标/围栏跟随工作地变更 ④红标可拖拽回写坐标 ⑤修正原生地图WGS84/BD09坐标偏移
+var APP_VERSION = "1.1.14"; // v1.1.14：设置不再影响历史——①每条记录产生时固化 cfg 快照（班次/午休/时薪/计薪方式），计算工时与金额时优先用记录自带快照，改设置只影响之后的新记录；②概览/记录列表/统计表的金额改为按各班次自己的时薪累加；③迟到判定改用该次签到时的班次快照；④旧记录自动补快照（backfillRecordCfg），从此不再漂移；⑤单日班次编辑器仍会同步该日记录（显式按日修正）；v1.1.13：修复工时/休息日/周期班次——①周期班次与单日班次保存时休息日不再被丢弃（勾「休」可不填时间）②00:00 被 falsy 误判为非法的所有校验改为 == null 判断（零点班可用）③休息日不再产生金额（概览/记录列表/月度统计全部不计薪，且不进月收入合计）④未签退的班次不再预付整班工时（未到下班时间只计已出勤时长）；v1.1.12：未到工作区禁止任何签到记录操作——新增 checkRecordGate() 统一闸门（工作地已设置+定位有效+定位≤60秒新鲜+在围栏内），接入 addRecord/doCheck/补录三处；签退不再"随处可签"；补录改存真实坐标；v1.1.11：云函数调用超时保护（未登录云开发/云函数不可达时搜索不再永久挂起）；v1.1.10：修复搜索无响应——①云函数返回体解包错位导致云路径从不生效 ②识别百度"天配额超限"并立即提示 ③搜索加12秒超时+按钮"搜索中"状态 ④同名匹配防止采纳别家公司坐标 ⑤搜索结果缓存降低配额消耗 ⑥输入联想防抖300→500ms、门槛2→3字；v1.1.9：修复工作地定位——①拒绝行政区级(城市/区县)坐标入库 ②「设为当前位置」主动取新鲜GPS ③原生地图红标/围栏跟随工作地变更 ④红标可拖拽回写坐标 ⑤修正原生地图WGS84/BD09坐标偏移
 const WEEKDAY_NAMES = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
 
 // ---- 通用自绘弹层：确认 / 输入（替代系统 confirm/prompt）----
@@ -2031,7 +2099,7 @@ function saveShiftEditor() {
     }
   }
   const baseCfg = dayConfigOf(dk);
-  DB.dayConfigMap[dk] = {
+  const newCfg = {
     start: start || null,
     end: end || null,
     breakMin: Math.max(0, parseInt($("#se-break").value, 10) || 0),
@@ -2040,11 +2108,27 @@ function saveShiftEditor() {
     off: off,
     frozen: dk < dateKey(new Date())
   };
+  DB.dayConfigMap[dk] = newCfg;
+  /* v1.1.14：单日班次编辑器是"针对这一天的显式修正"，
+     所以同步改写该日记录的配置快照；全局设置（时薪/默认时间/周几规则/计薪方式）
+     则永不触碰已有记录。两者语义不同，不要混为一谈。 */
+  let touched = 0;
+  (DB.records || []).forEach(function(r) {
+    if (!r || r.deleted) return;
+    if ((r.dateKey || dateKey(new Date(r.time))) !== dk) return;
+    r.cfg = {
+      start: newCfg.start, end: newCfg.end, breakMin: newCfg.breakMin,
+      rate: newCfg.rate, mode: newCfg.mode, off: newCfg.off
+    };
+    r.updatedAt = Date.now();
+    touched++;
+  });
   if (!saveDB()) { toast("保存失败", "bad"); return; }
   syncNativeSettings();
   renderAll();
   $("#dlg-shift-editor").classList.remove("show");
-  toast("已保存 " + dk + " 的班次" + (off ? "（休息日：不计工时与金额）" : ""), "ok");
+  toast("已保存 " + dk + " 的班次" + (off ? "（休息日：不计工时与金额）" : "") +
+        (touched ? "，已同步该日 " + touched + " 条记录" : ""), "ok");
 }
 
 // ---- 周期班次（按周几）----
@@ -2881,7 +2965,14 @@ function renderOverview() {
   const t = cfgTimesFor(todayKey, cfg);
   const minutes = dayMinutes(DB.records, start, end);
   const rateVal = (cfg.rate != null ? cfg.rate : DB.payRate) || 0;
-  const pay = computePay(minutes, rateVal);
+  /* v1.1.14：概览金额同样按每个班次自己的时薪快照累加，
+     调薪不会改写今天已结束班次的收入。 */
+  const todayShifts = computeShifts(DB.records, start, end, Math.max(0, parseInt(cfg.breakMin) || 0));
+  const pay = todayShifts.reduce(function(a, s) {
+    if (s.off) return a;
+    const rt = (s.rate != null ? s.rate : rateVal);
+    return a + (s.minutes / 60) * rt;
+  }, 0);
   const targetMin = getDailyTargetMinutes(DB, todayKey);
   const progress = targetMin > 0 ? Math.min(100, Math.round(minutes / targetMin * 100)) : 0;
   const modeLabel = cfg.mode === "actual" ? "按实际" : "按班次";
@@ -2893,7 +2984,11 @@ function renderOverview() {
   const firstIn = DB.records.filter(r => !r.deleted && r.time >= start && r.time < end && r.type === "in")
       .sort((a, b) => a.time - b.time)[0];
   if (firstIn && !cfg.off) {
-    const lateMin = Math.round((firstIn.time - t.startMs) / 60000);
+    /* v1.1.14：迟到按「该次签到时的班次快照」计算，
+       之后改上下班时间不会让今天已结束的班次变成"迟到/不迟到"。 */
+    const inCfg = (firstIn.cfg && typeof firstIn.cfg === "object") ? firstIn.cfg : cfg;
+    const inStartMs = cfgTimesFor(todayKey, inCfg).startMs;
+    const lateMin = Math.round((firstIn.time - inStartMs) / 60000);
     if (lateMin > 1) subText += ` · 迟到 ${fmtDurShort(lateMin)}`;
     else if (lateMin >= -1) subText += ` · 准时上班`;
     if (lateMin > 1 || lateMin < -1) subText += `（实到 ${fmtTime(firstIn.time)}）`;
@@ -2960,25 +3055,32 @@ function renderRecords() {
   shifts.forEach((s, idx) => {
     const row = document.createElement("tr");
     const realIn = fmtTime(s.in);
-    const legacyIn = Math.abs(s.in - t.startMs) < 60000;
-    const billIn = cfg.start || t.startStr, billOut = cfg.end || t.endStr;
+    /* v1.1.14：班次时间也用该班次自己的快照，
+       否则历史行显示的"班次时间"会跟着设置一起变。 */
+    const shStartMs = (s.setStartMs != null ? s.setStartMs : t.startMs);
+    const shEndMs = (s.setEndMs != null ? s.setEndMs : t.endMs);
+    const legacyIn = Math.abs(s.in - shStartMs) < 60000;
+    const billIn = s.startStr || cfg.start || t.startStr;
+    const billOut = s.endStr || cfg.end || t.endStr;
     const inCell = legacyIn
       ? escapeHtml(billIn)
       : escapeHtml(billIn) + '<br><span style="color:var(--acc);font-size:11px">实 ' + escapeHtml(realIn) + '</span>';
     let outCell = '<span style="color:var(--faint)">—</span>';
     if (s.out) {
-      const legacyOut = Math.abs(s.out - t.endMs) < 60000;
+      const legacyOut = Math.abs(s.out - shEndMs) < 60000;
       outCell = legacyOut
         ? escapeHtml(billOut)
         : escapeHtml(billOut) + '<br><span style="color:var(--acc);font-size:11px">实 ' + escapeHtml(fmtTime(s.out)) + '</span>';
     }
     const hours = (s.minutes / 60).toFixed(1);
-    // v1.1.13：休息日的记录不折算金额
-    const income = cfg.off ? "休·不计薪" : fmtMoney((s.minutes / 60) * rateVal);
+    /* v1.1.14：金额与计薪方式都取该班次自己的快照，
+       不再用当天的实时配置——否则改了时薪，历史班次的钱也跟着变。 */
+    const rowRate = (s.rate != null ? s.rate : rateVal);
+    const income = s.off ? "休·不计薪" : fmtMoney((s.minutes / 60) * rowRate);
     const src = s.source || "auto";
     const srcBadge = src === "sim" ? '<span class="tag late">模拟</span>' :
         (src === "manual" ? '<span class="tag in">手动</span>' : (src === "native" ? '<span class="tag in">原生</span>' : ''));
-    const effMin = (cfg.mode === "actual") ? s.rawMinutes : s.minutes; // T7.11#13：状态列与新计费口径对齐
+    const effMin = ((s.mode || cfg.mode) === "actual") ? s.rawMinutes : s.minutes; // T7.11#13：状态列与新计费口径对齐
     const status = !s.out ? '<span class="tag in">工作中</span>'
         : (effMin - s.breakMinutes > 0 ? '<span class="tag ok">正常</span>' : '<span class="tag warn">异常</span>');
     row.innerHTML = `
@@ -3058,14 +3160,20 @@ function renderStats() {
          原实现只要当天有打卡就算钱，导致「休」标记的日子照样进月收入，
          用户看到的就是"休息日还有金额记录"。现在休息日一律 0 金额，
          且不计入月度收入合计（工时仍照实显示，便于看当天出勤了多久）。 */
-      const income = cfg.off ? 0 : dayHours * rateVal;
+      /* v1.1.14：金额按「每个班次自己的时薪快照」累加，
+         这样后来调整时薪不会改写已结束班次的收入。休息日班次一律 0。 */
+      const income = shifts.reduce(function(a, s) {
+        if (s.off) return a;
+        const rt = (s.rate != null ? s.rate : rateVal);
+        return a + (s.minutes / 60) * rt;
+      }, 0);
       const completion = targetHours > 0 ? Math.round((dayHours / targetHours) * 100) : 0;
       const hasSign = shifts.length > 0;
       const isToday = dk === dateKey(today);
       
       if (hasSign) {
         monthTotalHours += dayHours;
-        if (!cfg.off) monthTotalIncome += income;   // v1.1.13：休息日不进月收入
+        monthTotalIncome += income;   // v1.1.14：休息日班次已在 income 内按 0 处理
         monthWorkDays++;
       }
       
@@ -4400,6 +4508,8 @@ $("#add-save").addEventListener("click", () => {
     fenceRadius: gate.radius,
     source: "manual",
     deviceId: "web_manual",
+    // v1.1.14：补录同样固化配置快照，后续改设置不会倒改它
+    cfg: recordCfgSnapshot(dk),
     updatedAt: Date.now()
   };
   // 检查同一天是否已有同类型记录，有则软删除覆盖（v111fix9：改软删除，墓碑随云同步传播，
