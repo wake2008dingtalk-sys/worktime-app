@@ -1565,23 +1565,53 @@ function computeShifts(records, dayStart, dayEnd, breakMinutes, cfgOverride) {
      现在按当天每条上班记录自带快照里的班次目标取最大值作为封顶额度，
      口径也按第一条上班记录的快照，改设置不再影响已产生的记录。
      仍保留"防翻倍"语义：多条重复打卡不会各自顶格相加。 */
-  let capMode = effMode, capTarget = targetMin;
+  /* v1.1.17：把「当天账本口径」一并挂到返回值上（sorted.ctx）。
+     之前只修了计算（capMode/capTarget 已取快照），但展示与导出仍在读实时
+     cfg.breakMin / cfg.off / cfg.mode / targetMin —— 于是改设置里的午休时长，
+     概览的「午休扣除 X」、统计表的「午休 Xmin」、CSV 的午休列、目标工时与
+     完成度照样跟着变，看起来就是"午休还在倒改历史"。
+     现在统一由 computeShifts 汇总出一份 ctx（有记录 → 来自记录快照；
+     无记录 → 回落实时配置），所有展示/导出口径都读它，与工时、金额同源。 */
+  let ctx;
   if (inRs.length) {
-    let maxTarget = 0;
+    let maxTarget = 0, maxBreak = 0;
     inRs.forEach(rIn => {
       const k = ctxOf(rIn);
       maxTarget = Math.max(maxTarget, Math.max(0, Math.round(k.t.setMin - k.brk)));
+      maxBreak = Math.max(maxBreak, k.brk);
     });
     const k0 = ctxOf(inRs[0]);
-    capMode = k0.off ? "actual" : k0.mode;
-    capTarget = maxTarget;
+    ctx = {
+      breakMin: k0.brk, breakMax: maxBreak,
+      off: !!k0.off, mode: k0.mode, rate: k0.rate,
+      targetMin: maxTarget,
+      startStr: k0.t.startStr, endStr: k0.t.endStr,
+      snap: k0.snap, source: "record"
+    };
+  } else {
+    ctx = {
+      breakMin: breakMin, breakMax: breakMin,
+      off: !!cfg.off, mode: effMode,
+      rate: (cfg.rate != null ? cfg.rate : (DB.payRate || 0)),
+      targetMin: targetMin,
+      startStr: t.startStr, endStr: t.endStr,
+      snap: null, source: "live"
+    };
   }
-  let remaining = capMode === "actual" ? 24 * 60 : capTarget;
+  let remaining = ctx.mode === "actual" ? 24 * 60 : ctx.targetMin;
   sorted.forEach(s => {
     s.minutes = Math.min(s.minutes, Math.max(0, remaining));
     remaining -= s.minutes;
   });
+  sorted.ctx = ctx;
   return sorted;
+}
+/* v1.1.17：取「某天的账本口径」。展示层统一走这里，
+   避免各处自己再读实时 cfg 而漏掉快照。 */
+function dayCtxOf(records, dayStart, dayEnd) {
+  const sh = computeShifts(records, dayStart, dayEnd);
+  return sh.ctx || { breakMin: 0, breakMax: 0, off: false, mode: "shift",
+                     rate: 0, targetMin: 0, source: "live" };
 }
 function getDailyBreakMinutes(db, dayKey) {
   const cfg = (db && db === DB) ? dayConfigOf(dayKey) : _liveConfigFor(db || DB, dayKey);
@@ -2062,7 +2092,7 @@ function resetDB() {
 }
 
 /* ===================== v3 功能实现（任务书第 4/5/7 批）===================== */
-var APP_VERSION = "1.1.16"; // v1.1.16：修复两处——①当日已完成记录仍被设置倒改：computeShifts 的「每日封顶额度/封顶口径」原先取实时配置（targetMin/effMode），改班次或每日工时后已完成的班次会被重新削顶（07:00-19:00 已记 690 分钟，改成 09:00-18:00 后变 510）；现改为按当天每条上班记录自带快照的班次目标取最大值来封顶、口径按首条快照，快照新增 hours 固化「每日工时」，旧记录升级时补一次；②云同步「假成功」：syncSettings/syncRecords/syncFromCloud 改为返回结构化结果（ok/uploaded/code/msg），任何一步云函数返回非 0 都明确提示是哪一步、错误码与消息，不再无条件弹「数据同步完成」；上传载荷补带 cfg 快照与 adminAdd，小程序端不会再用它那边的实时设置重算工时；重新绑定成功后重置全部记录的 syncedAt 以触发全量重传（此前换绑后本地记录都标着「已同步」，一条都不传 → 小程序永远空白），并新增「全量重传」按钮；上传成功但云端读回 0 条时提示核对是否同一个微信号；v1.1.15：新增「总数据管理」（设置 → 数据管理）——①全屏管理页：数据总览（有效/墓碑条数、覆盖天数、累计工时与金额）+ 日期区间/类型/状态筛选 + 逐条勾选（不勾则作用于筛选命中的全部）；②批量修改：时间平移（±分钟）、统一时刻、整体改期，跨日改动自动按目标日期重固化 cfg 快照；③软删除与恢复，只动选中的记录，不连带其它日期；④批量补录：按日期区间逐日补一对上下班，可跳过休息日与已有记录，来源标记 admin 且不伪造工作地点坐标；⑤清理墓碑、清空全部（软删除，设置项不受影响）；⑥每次写操作前把 records 整份快照存到独立 key（不进 DB/备份/云同步），可整体撤销一步；v1.1.14：设置不再影响历史——①每条记录产生时固化 cfg 快照（班次/午休/时薪/计薪方式），计算工时与金额时优先用记录自带快照，改设置只影响之后的新记录；②概览/记录列表/统计表的金额改为按各班次自己的时薪累加；③迟到判定改用该次签到时的班次快照；④旧记录自动补快照（backfillRecordCfg），从此不再漂移；⑤单日班次编辑器仍会同步该日记录（显式按日修正）；v1.1.13：修复工时/休息日/周期班次——①周期班次与单日班次保存时休息日不再被丢弃（勾「休」可不填时间）②00:00 被 falsy 误判为非法的所有校验改为 == null 判断（零点班可用）③休息日不再产生金额（概览/记录列表/月度统计全部不计薪，且不进月收入合计）④未签退的班次不再预付整班工时（未到下班时间只计已出勤时长）；v1.1.12：未到工作区禁止任何签到记录操作——新增 checkRecordGate() 统一闸门（工作地已设置+定位有效+定位≤60秒新鲜+在围栏内），接入 addRecord/doCheck/补录三处；签退不再"随处可签"；补录改存真实坐标；v1.1.11：云函数调用超时保护（未登录云开发/云函数不可达时搜索不再永久挂起）；v1.1.10：修复搜索无响应——①云函数返回体解包错位导致云路径从不生效 ②识别百度"天配额超限"并立即提示 ③搜索加12秒超时+按钮"搜索中"状态 ④同名匹配防止采纳别家公司坐标 ⑤搜索结果缓存降低配额消耗 ⑥输入联想防抖300→500ms、门槛2→3字；v1.1.9：修复工作地定位——①拒绝行政区级(城市/区县)坐标入库 ②「设为当前位置」主动取新鲜GPS ③原生地图红标/围栏跟随工作地变更 ④红标可拖拽回写坐标 ⑤修正原生地图WGS84/BD09坐标偏移
+var APP_VERSION = "1.1.17"; // v1.1.17：修复「午休时长仍会倒改已完成记录」——v1.1.16 已让计算走记录快照，但展示与导出仍在读实时设置，于是改设置里的午休时长后，首页「午休扣除 X」、记录列表、月度统计表的「午休 Xmin」/目标工时/完成度、CSV「午休(分钟)」列、按日期编辑弹窗里的「上班/下班/午休」全都跟着变，看起来就是午休还在回写历史。现在 computeShifts 统一汇总出「当天账本口径」shifts.ctx（有记录时来自该记录固化的 cfg 快照，无记录才回落实时配置），上述所有展示与导出口径都改为读它，与工时、金额同源；refreshAfterEdit 中那份会读实时配置的重复概览逻辑改为直接复用 renderOverview；CSV 的时薪/收入也改按班次快照，休息日写 0 并注明；v1.1.16：修复两处——①当日已完成记录仍被设置倒改：computeShifts 的「每日封顶额度/封顶口径」原先取实时配置（targetMin/effMode），改班次或每日工时后已完成的班次会被重新削顶（07:00-19:00 已记 690 分钟，改成 09:00-18:00 后变 510）；现改为按当天每条上班记录自带快照的班次目标取最大值来封顶、口径按首条快照，快照新增 hours 固化「每日工时」，旧记录升级时补一次；②云同步「假成功」：syncSettings/syncRecords/syncFromCloud 改为返回结构化结果（ok/uploaded/code/msg），任何一步云函数返回非 0 都明确提示是哪一步、错误码与消息，不再无条件弹「数据同步完成」；上传载荷补带 cfg 快照与 adminAdd，小程序端不会再用它那边的实时设置重算工时；重新绑定成功后重置全部记录的 syncedAt 以触发全量重传（此前换绑后本地记录都标着「已同步」，一条都不传 → 小程序永远空白），并新增「全量重传」按钮；上传成功但云端读回 0 条时提示核对是否同一个微信号；v1.1.15：新增「总数据管理」（设置 → 数据管理）——①全屏管理页：数据总览（有效/墓碑条数、覆盖天数、累计工时与金额）+ 日期区间/类型/状态筛选 + 逐条勾选（不勾则作用于筛选命中的全部）；②批量修改：时间平移（±分钟）、统一时刻、整体改期，跨日改动自动按目标日期重固化 cfg 快照；③软删除与恢复，只动选中的记录，不连带其它日期；④批量补录：按日期区间逐日补一对上下班，可跳过休息日与已有记录，来源标记 admin 且不伪造工作地点坐标；⑤清理墓碑、清空全部（软删除，设置项不受影响）；⑥每次写操作前把 records 整份快照存到独立 key（不进 DB/备份/云同步），可整体撤销一步；v1.1.14：设置不再影响历史——①每条记录产生时固化 cfg 快照（班次/午休/时薪/计薪方式），计算工时与金额时优先用记录自带快照，改设置只影响之后的新记录；②概览/记录列表/统计表的金额改为按各班次自己的时薪累加；③迟到判定改用该次签到时的班次快照；④旧记录自动补快照（backfillRecordCfg），从此不再漂移；⑤单日班次编辑器仍会同步该日记录（显式按日修正）；v1.1.13：修复工时/休息日/周期班次——①周期班次与单日班次保存时休息日不再被丢弃（勾「休」可不填时间）②00:00 被 falsy 误判为非法的所有校验改为 == null 判断（零点班可用）③休息日不再产生金额（概览/记录列表/月度统计全部不计薪，且不进月收入合计）④未签退的班次不再预付整班工时（未到下班时间只计已出勤时长）；v1.1.12：未到工作区禁止任何签到记录操作——新增 checkRecordGate() 统一闸门（工作地已设置+定位有效+定位≤60秒新鲜+在围栏内），接入 addRecord/doCheck/补录三处；签退不再"随处可签"；补录改存真实坐标；v1.1.11：云函数调用超时保护（未登录云开发/云函数不可达时搜索不再永久挂起）；v1.1.10：修复搜索无响应——①云函数返回体解包错位导致云路径从不生效 ②识别百度"天配额超限"并立即提示 ③搜索加12秒超时+按钮"搜索中"状态 ④同名匹配防止采纳别家公司坐标 ⑤搜索结果缓存降低配额消耗 ⑥输入联想防抖300→500ms、门槛2→3字；v1.1.9：修复工作地定位——①拒绝行政区级(城市/区县)坐标入库 ②「设为当前位置」主动取新鲜GPS ③原生地图红标/围栏跟随工作地变更 ④红标可拖拽回写坐标 ⑤修正原生地图WGS84/BD09坐标偏移
 const WEEKDAY_NAMES = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
 
 // ---- 通用自绘弹层：确认 / 输入（替代系统 confirm/prompt）----
@@ -2139,27 +2169,30 @@ function buildCSV() {
   const rows = [["日期", "类型", "上班", "下班", "工时(小时)", "午休(分钟)", "时薪", "收入(元)", "来源", "备注"]];
   const days = [...new Set((DB.records || []).filter(r => !r.deleted && r.dateKey).map(r => r.dateKey))].sort().reverse();
   days.forEach(function(dk) {
-    const cfg = dayConfigOf(dk);
-    const breakMin = Math.max(0, parseInt(cfg.breakMin) || 0);
-    const rateVal = (cfg.rate != null ? cfg.rate : DB.payRate) || 0;
-    const shifts = computeShifts(DB.records, dayStartTs(parseDateKey(dk)), dayEndTs(parseDateKey(dk)), breakMin);
+    /* v1.1.17：导出也按「当天账本口径」——午休列写每条班次自己的快照值、
+       时薪与收入用班次快照，休息日写 0 并标注。
+       原先这里读实时 cfg.breakMin，导出的表会跟着当前设置漂移。 */
+    const shifts = computeShifts(DB.records, dayStartTs(parseDateKey(dk)), dayEndTs(parseDateKey(dk)));
+    const dctx = shifts.ctx;
+    const rateVal = dctx.rate || 0;
     if (!shifts.length) {
       rows.push([dk, "无记录", "", "", "", "", rateVal, "", "", ""]);
       return;
     }
     shifts.forEach(function(s) {
       const hours = s.minutes / 60;
+      const rowRate = (s.rate != null ? s.rate : rateVal);
       rows.push([
         dk,
         s.out ? "完整班次" : "仅签到",
         fmtTime(s.in),
         s.out ? fmtTime(s.out) : "",
         hours.toFixed(2),
-        breakMin,
-        rateVal,
-        (hours * rateVal).toFixed(2),
+        s.breakMinutes,
+        rowRate,
+        s.off ? "0.00" : (hours * rowRate).toFixed(2),
         s.source || "auto",
-        s.out ? "" : "未签退"
+        s.off ? "休息日不计薪" : (s.out ? "" : "未签退")
       ]);
     });
   });
@@ -3155,28 +3188,31 @@ function renderOverview() {
   const start = dayStartTs(today), end = dayEndTs(today);
   const todayKey = dateKey(today);
   const cfg = dayConfigOf(todayKey);
-  const t = cfgTimesFor(todayKey, cfg);
-  const minutes = dayMinutes(DB.records, start, end);
-  const rateVal = (cfg.rate != null ? cfg.rate : DB.payRate) || 0;
+  /* v1.1.17：今天的一切展示都取「当天账本口径」todayShifts.ctx——
+     有记录时它来自每条记录固化的快照，改设置不会倒改已完成的数据。 */
+  const todayShifts = computeShifts(DB.records, start, end);
+  const dctx = todayShifts.ctx;
+  const minutes = todayShifts.reduce(function(a, s) { return a + s.minutes; }, 0);
+  const rateVal = dctx.rate || 0;
   /* v1.1.14：概览金额同样按每个班次自己的时薪快照累加，
      调薪不会改写今天已结束班次的收入。 */
-  const todayShifts = computeShifts(DB.records, start, end, Math.max(0, parseInt(cfg.breakMin) || 0));
   const pay = todayShifts.reduce(function(a, s) {
     if (s.off) return a;
     const rt = (s.rate != null ? s.rate : rateVal);
     return a + (s.minutes / 60) * rt;
   }, 0);
-  const targetMin = getDailyTargetMinutes(DB, todayKey);
+  const targetMin = dctx.targetMin;
   const progress = targetMin > 0 ? Math.min(100, Math.round(minutes / targetMin * 100)) : 0;
-  const modeLabel = cfg.mode === "actual" ? "按实际" : "按班次";
+  const modeLabel = dctx.mode === "actual" ? "按实际" : "按班次";
+  const dayOff = !!dctx.off;
 
   $("#ov-hours").textContent = fmtDurShort(minutes);
-  let subText = minutes > 0 ? fmtDur(minutes) : (cfg.off ? "休息日" : "今日尚未开始");
-  const breakMin = Math.max(0, parseInt(cfg.breakMin) || 0);
+  let subText = minutes > 0 ? fmtDur(minutes) : (dayOff ? "休息日" : "今日尚未开始");
+  const breakMin = dctx.breakMin;
   if (breakMin > 0) subText += ` · 午休扣除 ${fmtDurShort(breakMin)}`;
   const firstIn = DB.records.filter(r => !r.deleted && r.time >= start && r.time < end && r.type === "in")
       .sort((a, b) => a.time - b.time)[0];
-  if (firstIn && !cfg.off) {
+  if (firstIn && !dayOff) {
     /* v1.1.14：迟到按「该次签到时的班次快照」计算，
        之后改上下班时间不会让今天已结束的班次变成"迟到/不迟到"。 */
     const inCfg = (firstIn.cfg && typeof firstIn.cfg === "object") ? firstIn.cfg : cfg;
@@ -3188,13 +3224,13 @@ function renderOverview() {
   }
   $("#ov-hours-sub").textContent = subText;
   // v1.1.13：休息日不产生薪资（原实现会把当天分钟数折算成金额显示出来）
-  $("#ov-pay").textContent = cfg.off ? "休·不计薪" : fmtMoney(pay);
-  $("#ov-pay-sub").textContent = cfg.off ? "休息日不计薪" : ("@ ¥" + rateVal + "/时 · " + modeLabel);
-  $("#ov-progress").textContent = cfg.off ? (minutes > 0 ? "休·出勤" : "休息日") : progress + "%";
-  $("#ov-target").textContent = cfg.off ? "休息日 · 不计目标" : "目标 " + fmtDurShort(targetMin);
+  $("#ov-pay").textContent = dayOff ? "休·不计薪" : fmtMoney(pay);
+  $("#ov-pay-sub").textContent = dayOff ? "休息日不计薪" : ("@ ¥" + rateVal + "/时 · " + modeLabel);
+  $("#ov-progress").textContent = dayOff ? (minutes > 0 ? "休·出勤" : "休息日") : progress + "%";
+  $("#ov-target").textContent = dayOff ? "休息日 · 不计目标" : "目标 " + fmtDurShort(targetMin);
 
-  $("#pg-bar").style.width = (cfg.off ? (minutes > 0 ? 100 : 0) : progress) + "%";
-  $("#pg-label-text").textContent = fmtDurShort(minutes) + " / " + (cfg.off ? "休" : fmtDurShort(targetMin));
+  $("#pg-bar").style.width = (dayOff ? (minutes > 0 ? 100 : 0) : progress) + "%";
+  $("#pg-label-text").textContent = fmtDurShort(minutes) + " / " + (dayOff ? "休" : fmtDurShort(targetMin));
 
   // 考勤异常提醒展示位
   showAnomalyWarnings();
@@ -3237,9 +3273,11 @@ function renderRecords() {
   const dk = dateKey(today);
   const cfg = dayConfigOf(dk);
   const t = cfgTimesFor(dk, cfg);
-  const breakMin = Math.max(0, parseInt(cfg.breakMin) || 0);
-  const rateVal = (cfg.rate != null ? cfg.rate : DB.payRate) || 0;
-  const shifts = computeShifts(DB.records, start, end, breakMin);
+  /* v1.1.17：记录条目标识的时薪/午休/计薪方式一律取当天账本口径（快照），
+     不再读实时配置。 */
+  const shifts = computeShifts(DB.records, start, end);
+  const dctx = shifts.ctx;
+  const rateVal = dctx.rate || 0;
   const tbody = $("#rec-list");
   const emptyEl = $("#rec-empty");
   tbody.innerHTML = "";
@@ -3273,7 +3311,7 @@ function renderRecords() {
     const src = s.source || "auto";
     const srcBadge = src === "sim" ? '<span class="tag late">模拟</span>' :
         (src === "manual" ? '<span class="tag in">手动</span>' : (src === "native" ? '<span class="tag in">原生</span>' : ''));
-    const effMin = ((s.mode || cfg.mode) === "actual") ? s.rawMinutes : s.minutes; // T7.11#13：状态列与新计费口径对齐
+    const effMin = ((s.mode || dctx.mode) === "actual") ? s.rawMinutes : s.minutes; // T7.11#13：状态列与新计费口径对齐
     const status = !s.out ? '<span class="tag in">工作中</span>'
         : (effMin - s.breakMinutes > 0 ? '<span class="tag ok">正常</span>' : '<span class="tag warn">异常</span>');
     row.innerHTML = `
@@ -3341,12 +3379,15 @@ function renderStats() {
       const dk = dateKey(d);
       const dStart = dayStartTs(d);
       const dEnd = dayEndTs(d);
-      const cfg = dayConfigOf(dk);
-      const breakMin = Math.max(0, parseInt(cfg.breakMin) || 0);
-      const targetMin = getDailyTargetMinutes(DB, dk);
+      /* v1.1.17：午休/目标/时薪/是否休息日，全部取「当天账本口径」——
+         有记录的一天就锁定在记录产生时的那一刻，改设置不再回写这张表。 */
+      const shifts = computeShifts(DB.records, dStart, dEnd);
+      const dctx = shifts.ctx;
+      const breakMin = dctx.breakMin;
+      const targetMin = dctx.targetMin;
       const targetHours = targetMin / 60;
-      const rateVal = (cfg.rate != null ? cfg.rate : DB.payRate) || 0;
-      const shifts = computeShifts(DB.records, dStart, dEnd, breakMin);
+      const rateVal = dctx.rate || 0;
+      const dayOff = !!dctx.off;
       const dayMinutesTotal = shifts.reduce((s, x) => s + x.minutes, 0);
       const dayHours = dayMinutesTotal / 60;
       /* v1.1.13：休息日不计金额。
@@ -3371,12 +3412,12 @@ function renderStats() {
       }
       
       rowsHtml += `<tr data-dk="${dk}">
-        <td class="date-cell">${dk}${isToday ? ' <span style="color:var(--ok);font-size:10px">今天</span>' : ""}${cfg.off ? ' <span style="color:var(--faint);font-size:10px">休</span>' : ""}</td>
+        <td class="date-cell">${dk}${isToday ? ' <span style="color:var(--ok);font-size:10px">今天</span>' : ""}${dayOff ? ' <span style="color:var(--faint);font-size:10px">休</span>' : ""}</td>
         <td class="hours-cell">${hasSign ? dayHours.toFixed(1) + 'h' : '<span style="color:var(--faint)">—</span>'}</td>
         <td>${breakMin}min</td>
-        <td class="money-cell">${cfg.off ? '<span style="color:var(--faint)">休·不计薪</span>' : (hasSign ? fmtMoney(income) : '<span style="color:var(--faint)">—</span>')}</td>
-        <td>${cfg.off ? '休' : targetHours + 'h'}</td>
-        <td><span class="tag ${cfg.off ? 'in' : (completion >= 100 ? 'ok' : (completion >= 80 ? 'warn' : 'late'))}">${cfg.off ? '休' : completion + '%'}</span></td>
+        <td class="money-cell">${dayOff ? '<span style="color:var(--faint)">休·不计薪</span>' : (hasSign ? fmtMoney(income) : '<span style="color:var(--faint)">—</span>')}</td>
+        <td>${dayOff ? '休' : targetHours + 'h'}</td>
+        <td><span class="tag ${dayOff ? 'in' : (completion >= 100 ? 'ok' : (completion >= 80 ? 'warn' : 'late'))}">${dayOff ? '休' : completion + '%'}</span></td>
         <td>${hasSign ? `<button class="fbtn edit-btn" data-action="edit-shift" data-dk="${dk}" style="padding:2px 6px;font-size:10px">修改</button>` : '<span style="color:var(--faint)">—</span>'}</td>
       </tr>`;
     });
@@ -3568,8 +3609,7 @@ function openEditShiftByDate(dk) {
   const d = parseDateKey(dk);
   const dStart = dayStartTs(d);
   const dEnd = dayEndTs(d);
-  const breakMin = getDailyBreakMinutes(DB, dk);
-  const shifts = computeShifts(DB.records, dStart, dEnd, breakMin);
+  const shifts = computeShifts(DB.records, dStart, dEnd);
   
   if (!shifts.length) {
     toast("该日期暂无打卡记录", "warn");
@@ -3577,14 +3617,21 @@ function openEditShiftByDate(dk) {
   }
   
   const s = shifts[0];
+  /* v1.1.17：弹窗里的「当前上班/下班/午休」也取这条记录自己的快照，
+     不能读实时设置——否则打开一个三个月前的日子，会看到今天的班次时间
+     和今天的午休，接着一保存就把历史改成今天的口径了。 */
+  const breakMin = (shifts.ctx && shifts.ctx.breakMin != null) ? shifts.ctx.breakMin
+      : getDailyBreakMinutes(DB, dk);
   _editShift = s;
   _editType = "out"; // 日期编辑也修改下班时间
   _editDateMode = dk; // 标记为日期编辑模式，值为日期key
   
-  const inTime = (DB.dailyStartTimeMap && DB.dailyStartTimeMap[dk] !== undefined)
-    ? DB.dailyStartTimeMap[dk] : (DB.dailyStartTime || "09:00");
-  const outTime = (DB.dailyEndTimeMap && DB.dailyEndTimeMap[dk] !== undefined)
-    ? DB.dailyEndTimeMap[dk] : (DB.dailyEndTime || "18:00");
+  const inTime = s.startStr
+    || ((DB.dailyStartTimeMap && DB.dailyStartTimeMap[dk] !== undefined)
+      ? DB.dailyStartTimeMap[dk] : (DB.dailyStartTime || "09:00"));
+  const outTime = s.endStr
+    || ((DB.dailyEndTimeMap && DB.dailyEndTimeMap[dk] !== undefined)
+      ? DB.dailyEndTimeMap[dk] : (DB.dailyEndTime || "18:00"));
   
   // 设置弹窗内容
   $("#edit-label").textContent = "编辑 " + dk + " 打卡时间";
@@ -3611,47 +3658,12 @@ function openEditShiftByDate(dk) {
 
 // 删除班次（连带删除该班次对应的 in/out 记录）
 function refreshAfterEdit() {
-  // 增量刷新：只更新概览、记录表和统计，不调用 renderAll
-  const today = new Date();
-  const start = dayStartTs(today), end = dayEndTs(today);
-  const breakMin = getDailyBreakMinutes(DB, dateKey(today));
-  const shifts = computeShifts(DB.records, start, end, breakMin);
-  const minutes = shifts.reduce((s, x) => s + x.minutes, 0);
-  const pay = computePay(minutes, DB.payRate);
-  const targetMin = getDailyTargetMinutes(DB, dateKey(today));
-  const progress = targetMin > 0 ? Math.round(minutes / targetMin * 100) : 0;
-  const subText = (() => {
-    const totalRaw = shifts.reduce((s, x) => s + x.rawMinutes, 0);
-    const totalBreak = shifts.reduce((s, x) => s + x.breakMinutes, 0);
-    if (!minutes) return "--";
-    let text = fmtDurLong(minutes);
-    if (totalBreak > 0) text += " · 午休扣除 " + fmtDurShort(totalBreak);
-    const firstIn = DB.records.filter(r => !r.deleted && r.time >= start && r.time < end && r.type === "in").sort((a,
-        b)=>a.time-b.time)[0];
-    if (firstIn) {
-      const todayKey = dateKey(today);
-      const expStart = (DB.dailyStartTimeMap && DB.dailyStartTimeMap[todayKey]) || DB.dailyStartTime || "09:00";
-      const [h, m] = expStart.split(':').map(Number);
-      const expMs = start + h*3600000 + m*60000;
-      if (firstIn.time > expMs) {
-        const lateMin = Math.round((firstIn.time - expMs)/60000);
-        text += ` · 迟到 ${fmtDurShort(lateMin)}`;
-      } else {
-        text += ` · 准时上班`;
-      }
-    }
-    return text;
-  })();
-  $("#ov-hours").textContent = fmtDurShort(minutes);
-  $("#ov-hours-sub").textContent = subText;
-  // v1.1.13：休息日不产生薪资（与 renderOverview 口径保持一致）
-  const _cfgToday = dayConfigOf(dateKey(new Date()));
-  $("#ov-pay").textContent = _cfgToday.off ? "休·不计薪" : fmtMoney(pay);
-  $("#ov-pay-sub").textContent = _cfgToday.off ? "休息日不计薪" : ("@ ¥" + DB.payRate + "/时");
-  $("#ov-progress").textContent = progress + "%";
-  $("#ov-target").textContent = "目标 " + fmtDurShort(targetMin);
-  $("#pg-bar").style.width = progress + "%";
-  $("#pg-label-text").textContent = fmtDurShort(minutes) + " / " + fmtDurShort(targetMin);
+  /* v1.1.17：原来这里复制了一份概览刷新逻辑，读的是实时配置
+     （DB.payRate、实时午休时长、实时班次），跟 renderOverview 的快照口径不一致——
+     改设置后这里显示的「午休扣除」「目标」「金额」会又跟着变。
+     现在统一委托给 renderOverview（它已全部走记录快照），只多刷三块内容，
+     不碰地图，语义与原来一致。 */
+  renderOverview();
   renderRecords();
   renderStats();
   renderSettings();
@@ -5782,22 +5794,23 @@ function initAIChat() {
       // T7.11#2/#5：过滤软删除；工时统计与页面同口径（computeShifts + 当日配置）
       const recs = (DB && DB.records ? DB.records : []).filter(function(r) { return !r.deleted; });
       const todayDk = dateKey(new Date());
+      const todaySh = computeShifts(DB.records, dayStartTs(parseDateKey(todayDk)), dayEndTs(parseDateKey(todayDk)));
+      // v1.1.17：AI 上下文也走「当天账本口径」，与页面显示一致
+      const todayCtx = todaySh.ctx || {};
       const cfg = dayConfigOf(todayDk);
-      const rateVal = (cfg.rate != null ? cfg.rate : DB.payRate) || 0;
-      const dayMinsOf = function(dk) {
-        const sh = computeShifts(DB.records, dayStartTs(parseDateKey(dk)), dayEndTs(parseDateKey(dk)), getDailyBreakMinutes(DB, dk));
-        return sh.reduce(function(s, x) { return s + x.minutes; }, 0);
-      };
-      const todayMins = dayMinsOf(todayDk);
+      const rateVal = (todayCtx.rate != null ? todayCtx.rate : ((cfg.rate != null ? cfg.rate : DB.payRate) || 0)) || 0;
+      const todayMins = todaySh.reduce(function(s, x) { return s + x.minutes; }, 0);
       const days = [...new Set(recs.map(function(r) { return r.dateKey || dateKey(new Date(r.time)); }))].sort().reverse();
       const weekCount = Math.min(7, days.length);
       let weekMins = 0, weekIncome = 0;
       for (let i = 0; i < weekCount; i++) {
         const dk = days[i];
-        const c = dayConfigOf(dk);
-        const m = dayMinsOf(dk);
+        const sh = computeShifts(DB.records, dayStartTs(parseDateKey(dk)), dayEndTs(parseDateKey(dk)));
+        const c = sh.ctx || {};
+        const m = sh.reduce(function(s, x) { return s + x.minutes; }, 0);
         weekMins += m;
-        weekIncome += (m / 60) * ((c.rate != null ? c.rate : DB.payRate) || 0);
+        // 休息日不计薪；时薪取当天账本口径
+        if (!c.off) weekIncome += (m / 60) * ((c.rate != null ? c.rate : ((dayConfigOf(dk).rate != null ? dayConfigOf(dk).rate : DB.payRate) || 0)) || 0);
       }
       let streak = 0;
       for (let i = 0; i < days.length; i++) {
@@ -5808,17 +5821,21 @@ function initAIChat() {
       return {
         todayMinutes: Math.round(todayMins),
         todayHours: (todayMins / 60).toFixed(1),
-        todayIncome: ((todayMins / 60) * rateVal).toFixed(1),
+        todayIncome: (todaySh.reduce(function(a, s) {
+          if (s.off) return a;
+          const rt = (s.rate != null ? s.rate : rateVal);
+          return a + (s.minutes / 60) * rt;
+        }, 0)).toFixed(1),
         todayPunches: recs.filter(function(r) { return (r.dateKey || "") === todayDk && r.type === "in"; }).length,
         todayOuts: recs.filter(function(r) { return (r.dateKey || "") === todayDk && r.type === "out"; }).length,
         weekMinutes: Math.round(weekMins),
         weekHours: (weekMins / 60).toFixed(1),
         weekIncome: weekIncome.toFixed(1),
         hourlyPay: rateVal,
-        dailyTargetHours: (getDailyTargetMinutes(DB, todayDk) / 60).toFixed(1),
+        dailyTargetHours: (((todayCtx.targetMin != null) ? todayCtx.targetMin : getDailyTargetMinutes(DB, todayDk)) / 60).toFixed(1),
         totalRecords: recs.length,
         streakDays: streak,
-        offToday: !!cfg.off,
+        offToday: (todayCtx.off != null ? !!todayCtx.off : !!cfg.off),
         location: workPlace && workPlace.lat ? (Number(workPlace.lat).toFixed(2) + "," + Number(workPlace.lng).toFixed(2)) : "未设置"
       };
     } catch (e) { return {}; }
