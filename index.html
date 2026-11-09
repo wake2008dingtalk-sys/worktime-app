@@ -683,6 +683,14 @@ main{padding:14px;max-width:720px;margin:0 auto;padding-bottom:80px}
       <button class="fbtn" id="reset-data" style="color:var(--bad)">🗑 清空数据</button>
       <input type="file" id="import-file" accept=".json,application/json" style="display:none">
     </div>
+    <!-- v1.1.15：总数据管理（统一查看/修改/删除/补录/撤销） -->
+    <div class="set-row" style="flex-wrap:wrap;gap:8px;border-top:1px solid var(--line);padding-top:12px">
+      <label>数据管理</label>
+      <button class="fbtn primary" id="open-data-mgr">🗂 总数据管理</button>
+      <span style="color:var(--faint);font-size:12px;white-space:normal;line-height:1.5">
+        统一管理全部打卡数据：按条件筛选后批量改时间/改日期/删除/恢复/补录，全程可撤销
+      </span>
+    </div>
     <div class="hint">
       工作地点请通过上方输入框设置。地图上拖拽红色标记可微调位置。每日工时支持「统一按月」或「按天分别设置」。数据自动保存在本地，也可导出备份。
     </div>
@@ -760,6 +768,152 @@ main{padding:14px;max-width:720px;margin:0 auto;padding-bottom:80px}
   </div>
 </div>
 
+<!-- ================= v1.1.15：总数据管理（全屏子页面） ================= -->
+<div id="data-mgr" style="display:none;position:fixed;inset:0;z-index:900;background:var(--bg);flex-direction:column;overflow:hidden">
+  <div style="display:flex;align-items:center;padding:12px 14px;border-bottom:1px solid var(--line);background:var(--panel);flex-shrink:0;gap:8px">
+    <button id="dm-back" style="background:none;border:none;color:var(--txt);font-size:20px;padding:4px 6px;cursor:pointer;display:flex;align-items:center;gap:4px">
+      <span>←</span><span style="font-size:15px">返回</span>
+    </button>
+    <span style="font-weight:600;font-size:16px">总数据管理</span>
+    <button class="fbtn" id="dm-undo" style="margin-left:auto;font-size:11px;padding:5px 9px">↶ 撤销</button>
+  </div>
+
+  <div style="flex:1;overflow:auto;-webkit-overflow-scrolling:touch;padding:14px 14px 60px;overscroll-behavior-y:contain">
+
+    <!-- 1. 总览 -->
+    <div class="card" style="margin-bottom:10px">
+      <h3><span class="dot"></span>数据总览</h3>
+      <div id="dm-overview" style="font-size:12.5px;line-height:2;color:var(--dim)">统计中…</div>
+    </div>
+
+    <!-- 2. 筛选 -->
+    <div class="card" style="margin-bottom:10px">
+      <h3><span class="dot"></span>筛选范围</h3>
+      <div class="set-row" style="margin-bottom:8px">
+        <label style="min-width:52px">起</label>
+        <input id="dm-from" type="date" style="flex:1;min-width:0">
+        <label style="min-width:auto">止</label>
+        <input id="dm-to" type="date" style="flex:1;min-width:0">
+      </div>
+      <div class="set-row" style="margin-bottom:8px">
+        <label style="min-width:52px">类型</label>
+        <select id="dm-type" style="flex:1;min-width:0;background:var(--bg2);color:var(--txt);border:1px solid var(--line2);border-radius:8px;padding:6px">
+          <option value="all">全部</option><option value="in">仅上班</option><option value="out">仅下班</option>
+        </select>
+        <label style="min-width:auto">状态</label>
+        <select id="dm-state" style="flex:1;min-width:0;background:var(--bg2);color:var(--txt);border:1px solid var(--line2);border-radius:8px;padding:6px">
+          <option value="active">有效</option><option value="deleted">已删除</option><option value="all">全部</option>
+        </select>
+      </div>
+      <div class="set-row" style="margin-bottom:4px;flex-wrap:wrap;gap:8px">
+        <label style="min-width:52px">命中</label>
+        <span id="dm-hit" style="color:var(--acc);font-weight:600;font-size:13px">0 条</span>
+        <span id="dm-sel-count" style="color:var(--faint);font-size:12px">已选 0 条</span>
+        <button class="fbtn" id="dm-quick-7" style="font-size:11px;padding:4px 8px">近7天</button>
+        <button class="fbtn" id="dm-quick-30" style="font-size:11px;padding:4px 8px">近30天</button>
+        <button class="fbtn" id="dm-quick-month" style="font-size:11px;padding:4px 8px">本月</button>
+        <button class="fbtn" id="dm-quick-all" style="font-size:11px;padding:4px 8px">全部</button>
+      </div>
+      <div class="set-row" style="margin-bottom:2px;gap:8px">
+        <button class="fbtn" id="dm-sel-all">全选命中</button>
+        <button class="fbtn" id="dm-sel-none">清空选择</button>
+        <span style="color:var(--faint);font-size:11.5px">不勾选时，操作作用于「筛选命中的全部」</span>
+      </div>
+    </div>
+
+    <!-- 3. 记录清单 -->
+    <div class="card" style="margin-bottom:10px">
+      <h3><span class="dot"></span>记录清单
+        <span id="dm-list-note" style="float:right;color:var(--faint);font-size:11px;font-weight:400"></span>
+      </h3>
+      <div id="dm-list" style="max-height:44vh;overflow:auto;font-size:12px;margin-top:6px"></div>
+    </div>
+
+    <!-- 4. 批量修改 -->
+    <div class="card" style="margin-bottom:10px">
+      <h3><span class="dot"></span>批量修改</h3>
+      <div class="set-row" style="margin-bottom:8px;flex-wrap:wrap;gap:6px">
+        <label style="min-width:64px">时间平移</label>
+        <input id="dm-shift-min" type="tel" placeholder="±分钟" style="width:78px">
+        <button class="fbtn primary" id="dm-shift-apply">应用平移</button>
+        <span style="color:var(--faint);font-size:11.5px">正数推迟，负数提前</span>
+      </div>
+      <div class="set-row" style="margin-bottom:8px;flex-wrap:wrap;gap:6px">
+        <label style="min-width:64px">统一时刻</label>
+        <input id="dm-set-time" type="time">
+        <button class="fbtn primary" id="dm-set-time-apply">设为该时刻</button>
+        <span style="color:var(--faint);font-size:11.5px">保留原日期</span>
+      </div>
+      <div class="set-row" style="margin-bottom:8px;flex-wrap:wrap;gap:6px">
+        <label style="min-width:64px">改到某天</label>
+        <input id="dm-move-date" type="date">
+        <button class="fbtn primary" id="dm-move-apply">整体改期</button>
+        <span style="color:var(--faint);font-size:11.5px">保留时分，重算该日班次</span>
+      </div>
+      <div class="set-row" style="margin-bottom:6px;flex-wrap:wrap;gap:8px">
+        <label style="min-width:64px">删除/恢复</label>
+        <button class="fbtn" id="dm-del" style="color:var(--bad)">🗑 删除所选</button>
+        <button class="fbtn" id="dm-restore">♻ 恢复所选</button>
+      </div>
+      <div class="hint">
+        只改「你选中的记录」，不会因为改数据而改动设置，也不会连带改动未选中的日期。
+        每次操作前自动存一份快照，点右上角「撤销」可整体回滚上一步。
+      </div>
+    </div>
+
+    <!-- 5. 批量补录 -->
+    <div class="card" style="margin-bottom:10px">
+      <h3><span class="dot"></span>批量补录</h3>
+      <div class="set-row" style="margin-bottom:8px;flex-wrap:wrap;gap:6px">
+        <label style="min-width:64px">日期区间</label>
+        <input id="dm-add-from" type="date" style="flex:1;min-width:0">
+        <span style="color:var(--faint)">~</span>
+        <input id="dm-add-to" type="date" style="flex:1;min-width:0">
+      </div>
+      <div class="set-row" style="margin-bottom:8px;flex-wrap:wrap;gap:6px">
+        <label style="min-width:64px">上班/下班</label>
+        <input id="dm-add-in" type="time" value="09:00">
+        <input id="dm-add-out" type="time" value="18:00">
+      </div>
+      <div class="set-row" style="margin-bottom:8px;flex-wrap:wrap;gap:10px">
+        <label style="display:flex;align-items:center;gap:5px;font-size:12px;min-width:auto;max-width:none;color:var(--dim)">
+          <input type="checkbox" id="dm-add-skipoff" checked style="width:15px;height:15px"> 跳过休息日
+        </label>
+        <label style="display:flex;align-items:center;gap:5px;font-size:12px;min-width:auto;max-width:none;color:var(--dim)">
+          <input type="checkbox" id="dm-add-skiphas" checked style="width:15px;height:15px"> 跳过已有记录的日子
+        </label>
+      </div>
+      <div class="set-row" style="margin-bottom:4px">
+        <button class="fbtn primary" id="dm-add-apply">＋ 批量补录</button>
+        <span style="color:var(--faint);font-size:11.5px">补录会标记来源为「管理补录」</span>
+      </div>
+      <div class="hint">
+        补录记录来源记为 admin，与真实打卡区分；坐标只写当前真实定位（没有就留空），
+        不会伪造成工作地坐标。补录前会列出将跳过的天数让你确认。
+      </div>
+    </div>
+
+    <!-- 6. 备份与清理 -->
+    <div class="card">
+      <h3><span class="dot"></span>备份与清理</h3>
+      <div class="set-row" style="margin-bottom:8px;flex-wrap:wrap;gap:8px">
+        <button class="fbtn" id="dm-export">📤 导出备份</button>
+        <button class="fbtn" id="dm-import">📥 导入备份</button>
+        <button class="fbtn" id="dm-csv">📊 导出 CSV</button>
+      </div>
+      <div class="set-row" style="margin-bottom:8px;flex-wrap:wrap;gap:8px">
+        <button class="fbtn" id="dm-purge">🧹 清理已删除墓碑</button>
+        <span id="dm-purge-note" style="color:var(--faint);font-size:11.5px"></span>
+      </div>
+      <div class="set-row" style="margin-bottom:4px;flex-wrap:wrap;gap:8px">
+        <button class="fbtn" id="dm-clear" style="color:var(--bad)">☠ 清空全部记录</button>
+        <span style="color:var(--faint);font-size:11.5px">软删除，可撤销；设置项不受影响</span>
+      </div>
+      <div class="hint" id="dm-undo-note">尚未执行过批量操作。</div>
+    </div>
+
+  </div>
+</div>
 
 <!-- 隐私政策与服务条款首次同意弹窗（v1.0.1 商店合规：不默认勾选、可随时在设置中查阅） -->
 <div class="dlg-mask" id="dlg-privacy">
@@ -1870,7 +2024,7 @@ function resetDB() {
 }
 
 /* ===================== v3 功能实现（任务书第 4/5/7 批）===================== */
-var APP_VERSION = "1.1.14"; // v1.1.14：设置不再影响历史——①每条记录产生时固化 cfg 快照（班次/午休/时薪/计薪方式），计算工时与金额时优先用记录自带快照，改设置只影响之后的新记录；②概览/记录列表/统计表的金额改为按各班次自己的时薪累加；③迟到判定改用该次签到时的班次快照；④旧记录自动补快照（backfillRecordCfg），从此不再漂移；⑤单日班次编辑器仍会同步该日记录（显式按日修正）；v1.1.13：修复工时/休息日/周期班次——①周期班次与单日班次保存时休息日不再被丢弃（勾「休」可不填时间）②00:00 被 falsy 误判为非法的所有校验改为 == null 判断（零点班可用）③休息日不再产生金额（概览/记录列表/月度统计全部不计薪，且不进月收入合计）④未签退的班次不再预付整班工时（未到下班时间只计已出勤时长）；v1.1.12：未到工作区禁止任何签到记录操作——新增 checkRecordGate() 统一闸门（工作地已设置+定位有效+定位≤60秒新鲜+在围栏内），接入 addRecord/doCheck/补录三处；签退不再"随处可签"；补录改存真实坐标；v1.1.11：云函数调用超时保护（未登录云开发/云函数不可达时搜索不再永久挂起）；v1.1.10：修复搜索无响应——①云函数返回体解包错位导致云路径从不生效 ②识别百度"天配额超限"并立即提示 ③搜索加12秒超时+按钮"搜索中"状态 ④同名匹配防止采纳别家公司坐标 ⑤搜索结果缓存降低配额消耗 ⑥输入联想防抖300→500ms、门槛2→3字；v1.1.9：修复工作地定位——①拒绝行政区级(城市/区县)坐标入库 ②「设为当前位置」主动取新鲜GPS ③原生地图红标/围栏跟随工作地变更 ④红标可拖拽回写坐标 ⑤修正原生地图WGS84/BD09坐标偏移
+var APP_VERSION = "1.1.15"; // v1.1.15：新增「总数据管理」（设置 → 数据管理）——①全屏管理页：数据总览（有效/墓碑条数、覆盖天数、累计工时与金额）+ 日期区间/类型/状态筛选 + 逐条勾选（不勾则作用于筛选命中的全部）；②批量修改：时间平移（±分钟）、统一时刻、整体改期，跨日改动自动按目标日期重固化 cfg 快照；③软删除与恢复，只动选中的记录，不连带其它日期；④批量补录：按日期区间逐日补一对上下班，可跳过休息日与已有记录，来源标记 admin 且不伪造工作地点坐标；⑤清理墓碑、清空全部（软删除，设置项不受影响）；⑥每次写操作前把 records 整份快照存到独立 key（不进 DB/备份/云同步），可整体撤销一步；v1.1.14：设置不再影响历史——①每条记录产生时固化 cfg 快照（班次/午休/时薪/计薪方式），计算工时与金额时优先用记录自带快照，改设置只影响之后的新记录；②概览/记录列表/统计表的金额改为按各班次自己的时薪累加；③迟到判定改用该次签到时的班次快照；④旧记录自动补快照（backfillRecordCfg），从此不再漂移；⑤单日班次编辑器仍会同步该日记录（显式按日修正）；v1.1.13：修复工时/休息日/周期班次——①周期班次与单日班次保存时休息日不再被丢弃（勾「休」可不填时间）②00:00 被 falsy 误判为非法的所有校验改为 == null 判断（零点班可用）③休息日不再产生金额（概览/记录列表/月度统计全部不计薪，且不进月收入合计）④未签退的班次不再预付整班工时（未到下班时间只计已出勤时长）；v1.1.12：未到工作区禁止任何签到记录操作——新增 checkRecordGate() 统一闸门（工作地已设置+定位有效+定位≤60秒新鲜+在围栏内），接入 addRecord/doCheck/补录三处；签退不再"随处可签"；补录改存真实坐标；v1.1.11：云函数调用超时保护（未登录云开发/云函数不可达时搜索不再永久挂起）；v1.1.10：修复搜索无响应——①云函数返回体解包错位导致云路径从不生效 ②识别百度"天配额超限"并立即提示 ③搜索加12秒超时+按钮"搜索中"状态 ④同名匹配防止采纳别家公司坐标 ⑤搜索结果缓存降低配额消耗 ⑥输入联想防抖300→500ms、门槛2→3字；v1.1.9：修复工作地定位——①拒绝行政区级(城市/区县)坐标入库 ②「设为当前位置」主动取新鲜GPS ③原生地图红标/围栏跟随工作地变更 ④红标可拖拽回写坐标 ⑤修正原生地图WGS84/BD09坐标偏移
 const WEEKDAY_NAMES = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
 
 // ---- 通用自绘弹层：确认 / 输入（替代系统 confirm/prompt）----
@@ -4729,6 +4883,481 @@ document.getElementById("theme-tabs") && document.getElementById("theme-tabs").a
   saveTheme(theme);
   toast("已切换为" + (theme === "dark" ? "暗夜" : theme === "light" ? "明亮" : theme === "eye-care" ? "护眼" : "高对比度") + "模式",
       "ok");
+});
+
+/* ===================== v1.1.15：总数据管理 =====================
+   设计要点（与 v1.1.14「设置不倒改历史」严格区分）：
+   - 设置页改的是"以后怎么算"，永不回头改已有记录；
+   - 这里是"用户显式修正数据"，只改被选中的记录，逐条留痕（updatedAt / source / adminAdd）；
+   - 每次批量写操作前把 records 整份快照存到独立 localStorage key（不进 DB，
+     避免被云同步带上去，也不污染备份文件），可整体撤销一步。 */
+var DM_UNDO_KEY = "myatt_dm_undo_v1";
+var DM_LIST_LIMIT = 300;
+var dmSel = Object.create(null);              // recordKey -> true
+var dmF = { from: "", to: "", type: "all", state: "active" };
+
+function dmKey(r) {
+  if (!r) return "";
+  if (r.id) return String(r.id);
+  return "k_" + (r.dateKey || "") + "_" + r.type + "_" + r.time;
+}
+function dmFiltered() {
+  var from = dmF.from ? new Date(dmF.from + "T00:00:00").getTime() : -Infinity;
+  var to = dmF.to ? new Date(dmF.to + "T23:59:59.999").getTime() : Infinity;
+  return (DB.records || []).filter(function(r) {
+    if (!r) return false;
+    if (!(r.time >= from && r.time <= to)) return false;
+    if (dmF.type !== "all" && r.type !== dmF.type) return false;
+    if (dmF.state === "active" && r.deleted) return false;
+    if (dmF.state === "deleted" && !r.deleted) return false;
+    return true;
+  }).sort(function(a, b) { return b.time - a.time; });
+}
+function dmSelectedKeys() {
+  return Object.keys(dmSel).filter(function(k) { return dmSel[k]; });
+}
+/* 目标集合：有勾选 → 用勾选的；没勾选 → 用筛选命中的全部 */
+function dmTargets() {
+  var keys = dmSelectedKeys();
+  if (keys.length) {
+    var set = Object.create(null);
+    keys.forEach(function(k) { set[k] = 1; });
+    return (DB.records || []).filter(function(r) { return set[dmKey(r)]; });
+  }
+  return dmFiltered();
+}
+function dmTargetLabel(n) {
+  return dmSelectedKeys().length ? ("选中的 " + n + " 条") : ("筛选命中的 " + n + " 条");
+}
+
+// ---- 撤销快照（只保留最近一次，独立 key，不进 DB 也不进备份）----
+function dmSaveUndo(label) {
+  try {
+    localStorage.setItem(DM_UNDO_KEY, JSON.stringify({
+      ts: Date.now(), label: label,
+      records: JSON.parse(JSON.stringify(DB.records || []))
+    }));
+    return true;
+  } catch (e) { Logger.warn("dmSaveUndo:", e); return false; }
+}
+/* 写操作统一入口：先存快照；存不下时明确告警（宁可不静默） */
+function dmSnapshot(label) {
+  var ok = dmSaveUndo(label);
+  if (!ok) toast("提示：本次快照未能保存（数据量较大），这次操作将无法撤销", "warn", 5000);
+  return ok;
+}
+function dmUndoInfo() {
+  try {
+    var raw = localStorage.getItem(DM_UNDO_KEY);
+    if (!raw) return null;
+    var s = JSON.parse(raw);
+    return (s && Array.isArray(s.records)) ? s : null;
+  } catch (e) { return null; }
+}
+async function dmUndo() {
+  var s = dmUndoInfo();
+  if (!s) { toast("没有可撤销的操作", "warn"); return; }
+  var ok = await customConfirm("撤销上一次数据操作",
+      "将把打卡记录整体恢复为「" + s.label + "」执行前的状态（共 " + s.records.length + " 条，"
+      + new Date(s.ts).toLocaleString() + "）。当前这次改动会丢失。", "确认撤销");
+  if (!ok) return;
+  DB.records = s.records;
+  try { normalizeDB(DB); } catch (e) { Logger.warn("undo normalize:", e); }
+  saveDB();
+  renderAll();
+  dmRefresh();
+  try { localStorage.removeItem(DM_UNDO_KEY); } catch (e) {}
+  dmRenderUndoNote();
+  toast("已撤销：" + s.label, "ok");
+  if (window.CloudSync && typeof window.CloudSync.onRecordChange === "function") {
+    try { window.CloudSync.onRecordChange(); } catch (e) {}
+  }
+}
+
+// ---- 渲染 ----
+function dmRenderOverview() {
+  var el = $("#dm-overview");
+  if (!el) return;
+  var all = DB.records || [];
+  var act = all.filter(function(r) { return !r.deleted; });
+  var delN = all.length - act.length;
+  var daySet = Object.create(null);
+  act.forEach(function(r) { daySet[r.dateKey || dateKey(new Date(r.time))] = 1; });
+  var days = Object.keys(daySet).sort();
+  var cap = 730, use = days.slice(-cap);
+  var totalMin = 0, totalPay = 0;
+  use.forEach(function(dk) {
+    var st = new Date(dk + "T00:00:00").getTime();
+    if (isNaN(st)) return;
+    var sh;
+    try { sh = computeShifts(DB.records, st, st + 86400000); } catch (e) { return; }
+    (sh || []).forEach(function(s) {
+      if (s.off) return;
+      totalMin += s.minutes;
+      totalPay += (s.minutes / 60) * (s.rate != null ? s.rate : (DB.payRate || 0));
+    });
+  });
+  var adminN = act.filter(function(r) { return r.adminAdd; }).length;
+  function row(k, v) {
+    return '<div style="display:flex;gap:10px"><span style="color:var(--faint);min-width:70px;flex-shrink:0">'
+      + k + '</span><span style="color:var(--txt);word-break:break-all">' + v + '</span></div>';
+  }
+  el.innerHTML =
+    row("记录总数", act.length + " 条有效" + (delN ? " · " + delN + " 条已删除" : "")) +
+    row("覆盖天数", days.length + " 天" + (days.length ? "（" + days[0] + " ~ " + days[days.length - 1] + "）" : "")) +
+    row("累计工时", fmtDurShort(totalMin) + " · 约 " + (totalMin / 60).toFixed(1) + " 小时") +
+    row("累计金额", "¥ " + totalPay.toFixed(2) + ' <span style="color:var(--faint);font-size:11px">（按各记录快照时薪累加）</span>') +
+    row("管理补录", adminN + " 条" + (adminN ? "（来源 admin，可在此筛出）" : "")) +
+    (days.length > cap ? row("统计范围", "仅汇总最近 " + cap + " 天") : "");
+}
+function dmRenderList() {
+  var box = $("#dm-list");
+  if (!box) return;
+  var list = dmFiltered();
+  var note = $("#dm-list-note");
+  if (!list.length) {
+    box.innerHTML = '<div style="color:var(--faint);padding:14px">没有符合条件的记录</div>';
+    if (note) note.textContent = "";
+    return;
+  }
+  if (note) {
+    note.textContent = list.length > DM_LIST_LIMIT
+      ? ("显示前 " + DM_LIST_LIMIT + " / 共 " + list.length + " 条，请缩小范围")
+      : ("共 " + list.length + " 条");
+  }
+  box.innerHTML = list.slice(0, DM_LIST_LIMIT).map(function(r) {
+    var k = dmKey(r);
+    var dk = r.dateKey || dateKey(new Date(r.time));
+    var src = r.source === "admin" ? "管理补录" : r.source === "manual" ? "补录"
+      : r.source === "sim" ? "演示" : "自动";
+    return '<label style="display:flex;align-items:center;gap:8px;padding:7px 2px;border-bottom:1px solid var(--line);cursor:pointer'
+      + (r.deleted ? ";opacity:.45" : "") + '">'
+      + '<input type="checkbox" data-dmk="' + escapeHtml(k) + '"'
+      + (dmSel[k] ? " checked" : "") + ' style="width:16px;height:16px;flex-shrink:0">'
+      + '<span style="font-family:var(--mono);color:' + (r.type === "out" ? "var(--warn)" : "var(--ok)")
+      + ';flex-shrink:0">' + (r.type === "out" ? "下班" : "上班") + '</span>'
+      + '<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--txt)">'
+      + escapeHtml(dk) + " " + fmtTime(r.time) + '</span>'
+      + '<span style="color:var(--faint);font-size:11px;flex-shrink:0">' + escapeHtml(src) + '</span>'
+      + (r.deleted ? '<span style="color:var(--bad);font-size:11px;flex-shrink:0">已删</span>' : '')
+      + '</label>';
+  }).join("");
+}
+function dmRenderHit() {
+  var hit = $("#dm-hit"), sel = $("#dm-sel-count");
+  var n = dmFiltered().length;
+  if (hit) hit.textContent = n + " 条";
+  if (sel) sel.textContent = "已选 " + dmSelectedKeys().length + " 条";
+}
+function dmRenderPurgeNote() {
+  var n = $("#dm-purge-note");
+  if (!n) return;
+  var c = (DB.records || []).filter(function(r) { return r.deleted; }).length;
+  n.textContent = c ? (c + " 条墓碑可清理") : "无墓碑";
+}
+function dmRenderUndoNote() {
+  var n = $("#dm-undo-note");
+  if (!n) return;
+  var s = dmUndoInfo();
+  if (!s) { n.textContent = "尚未执行过批量操作。"; return; }
+  n.innerHTML = '可撤销：<b style="color:var(--acc)">' + escapeHtml(s.label) + '</b> · '
+    + new Date(s.ts).toLocaleString() + '（仅保留最近一次）';
+}
+function dmRefresh() {
+  dmRenderOverview();
+  dmRenderList();
+  dmRenderHit();
+  dmRenderPurgeNote();
+  dmRenderUndoNote();
+}
+function dmOpen() {
+  var today = dateKey(new Date());
+  var m0 = today.slice(0, 7) + "-01";
+  if (!$("#dm-from").value) { dmF.from = m0; $("#dm-from").value = m0; }
+  if (!$("#dm-to").value) { dmF.to = today; $("#dm-to").value = today; }
+  if (!$("#dm-add-from").value) $("#dm-add-from").value = m0;
+  if (!$("#dm-add-to").value) $("#dm-add-to").value = today;
+  $("#data-mgr").style.display = "flex";
+  document.body.style.overflow = "hidden";
+  dmRefresh();
+}
+function dmClose() {
+  $("#data-mgr").style.display = "none";
+  document.body.style.overflow = "";
+}
+
+// ---- 单项改写：时间变了且跨日，必须按新日期重固化配置快照 ----
+function dmApplyTime(r, newTs) {
+  if (!r || !isFinite(newTs)) return;
+  var oldDk = r.dateKey || dateKey(new Date(r.time));
+  var newDk = dateKey(new Date(newTs));
+  r.time = newTs;
+  r.dateKey = newDk;
+  if (newDk !== oldDk) {
+    /* 原快照属于旧日期的班次口径，继续沿用会按错误班次算工时，
+       这里按目标日期重新固化（等价于"这条记录本来就产生在新日期"）。 */
+    try { r.cfg = recordCfgSnapshot(newDk); } catch (e) {}
+  }
+  r.updatedAt = Date.now();
+}
+function dmAfterWrite(label) {
+  var ok = saveDB();
+  renderAll();
+  dmRefresh();
+  if (window.CloudSync && typeof window.CloudSync.onRecordChange === "function") {
+    try { window.CloudSync.onRecordChange(); } catch (e) {}
+  }
+  if (!ok) toast("已改动，但写入本地存储失败，请立即导出备份", "bad", 6000);
+  return ok;
+}
+
+// ---- 删除 / 恢复 ----
+async function dmDelete() {
+  var t = dmTargets();
+  if (!t.length) { toast("没有可删除的记录（请先筛选或勾选）", "warn"); return; }
+  var act = t.filter(function(r) { return !r.deleted; });
+  if (!act.length) { toast("所选记录都已删除", "warn"); return; }
+  var ok = await customConfirm("删除记录",
+      "将删除 " + dmTargetLabel(act.length) + "。删除为软删除，可在「已删除」状态下恢复，也可点右上角撤销。",
+      "确认删除");
+  if (!ok) return;
+  dmSnapshot("删除 " + act.length + " 条");
+  var now = Date.now();
+  act.forEach(function(r) { r.deleted = true; r.updatedAt = now; });
+  dmAfterWrite();
+  toast("已删除 " + act.length + " 条（可撤销）", "ok");
+}
+async function dmRestore() {
+  var t = dmTargets().filter(function(r) { return r.deleted; });
+  if (!t.length) { toast("没有可恢复的记录（请把状态切到「已删除」再选）", "warn"); return; }
+  var ok = await customConfirm("恢复记录", "将恢复 " + t.length + " 条已删除记录。", "确认恢复");
+  if (!ok) return;
+  dmSnapshot("恢复 " + t.length + " 条");
+  var now = Date.now();
+  t.forEach(function(r) { r.deleted = false; r.updatedAt = now; });
+  dmAfterWrite();
+  toast("已恢复 " + t.length + " 条（可撤销）", "ok");
+}
+
+// ---- 时间平移 / 统一时刻 / 改期 ----
+async function dmShiftMinutes() {
+  var n = parseInt($("#dm-shift-min").value, 10);
+  if (!isFinite(n) || n === 0) { toast("请输入非 0 的分钟数（负数表示提前）", "warn"); return; }
+  var t = dmTargets();
+  if (!t.length) { toast("没有可修改的记录（请先筛选或勾选）", "warn"); return; }
+  var ok = await customConfirm("平移打卡时间",
+      "将 " + dmTargetLabel(t.length) + " 的时间" + (n > 0 ? "推迟 " : "提前 ") + Math.abs(n)
+      + " 分钟。跨日的记录会按新日期的班次重算工时。", "确认修改");
+  if (!ok) return;
+  dmSnapshot("时间平移 " + (n > 0 ? "+" : "") + n + " 分钟 × " + t.length + " 条");
+  var now = Date.now();
+  t.forEach(function(r) { dmApplyTime(r, r.time + n * 60000); r.updatedAt = now; });
+  dmAfterWrite();
+  toast("已平移 " + t.length + " 条", "ok");
+}
+async function dmSetTime() {
+  var hm = $("#dm-set-time").value;
+  var mins = parseHM(hm);
+  if (mins == null) { toast("请选择统一时刻", "warn"); return; }
+  var t = dmTargets();
+  if (!t.length) { toast("没有可修改的记录（请先筛选或勾选）", "warn"); return; }
+  var ok = await customConfirm("统一打卡时刻",
+      "将 " + dmTargetLabel(t.length) + " 的时刻统一改为 " + hm + "（日期不变）。", "确认修改");
+  if (!ok) return;
+  dmSnapshot("统一时刻 " + hm + " × " + t.length + " 条");
+  var h = Math.floor(mins / 60), m = mins % 60, now = Date.now();
+  t.forEach(function(r) {
+    var d = new Date(r.time);
+    d.setHours(h, m, 0, 0);
+    dmApplyTime(r, d.getTime());
+    r.updatedAt = now;
+  });
+  dmAfterWrite();
+  toast("已统一为 " + hm, "ok");
+}
+async function dmMoveDate() {
+  var dk = $("#dm-move-date").value;
+  if (!dk) { toast("请选择目标日期", "warn"); return; }
+  var t = dmTargets();
+  if (!t.length) { toast("没有可修改的记录（请先筛选或勾选）", "warn"); return; }
+  var ok = await customConfirm("整体改期",
+      "将 " + dmTargetLabel(t.length) + " 的日期改为 " + dk + "（保留原时分，按该日班次重算）。"
+      + "若多条记录挤到同一天，可能互相配对，请自行核对。", "确认改期");
+  if (!ok) return;
+  dmSnapshot("改期到 " + dk + " × " + t.length + " 条");
+  var p = dk.split("-").map(Number), now = Date.now();
+  t.forEach(function(r) {
+    var old = new Date(r.time);
+    var nd = new Date(p[0], p[1] - 1, p[2], old.getHours(), old.getMinutes(), old.getSeconds(), 0);
+    dmApplyTime(r, nd.getTime());
+    r.updatedAt = now;
+  });
+  dmAfterWrite();
+  toast("已改期到 " + dk, "ok");
+}
+
+// ---- 批量补录 ----
+function dmDateRange(from, to) {
+  var out = [];
+  var d = new Date(from + "T00:00:00");
+  var end = new Date(to + "T00:00:00").getTime();
+  if (isNaN(d.getTime()) || isNaN(end)) return out;
+  var guard = 0;
+  while (d.getTime() <= end && guard++ < 2000) {
+    out.push(dateKey(d));
+    d = new Date(d.getTime() + 86400000);
+  }
+  return out;
+}
+function dmMakeRec(dk, type, hm) {
+  var p = dk.split("-").map(Number);
+  var mins = parseHM(hm);
+  if (mins == null) return null;
+  var ts = new Date(p[0], p[1] - 1, p[2], Math.floor(mins / 60), mins % 60, 0, 0).getTime();
+  return {
+    id: "r" + ts.toString(36) + Math.random().toString(36).slice(2, 5),
+    dateKey: dk,
+    type: type,
+    time: ts,
+    /* v1.1.12 教训：绝不伪造成工作地坐标。只写当前真实定位，没有就留空。 */
+    lat: (lastPos && lastPos.lat != null) ? lastPos.lat : null,
+    lng: (lastPos && lastPos.lng != null) ? lastPos.lng : null,
+    acc: (lastPos && lastPos.acc != null) ? lastPos.acc : null,
+    dist: null,
+    fenceRadius: DB.fenceRadius,
+    source: "admin",
+    adminAdd: true,
+    cfg: recordCfgSnapshot(dk),
+    updatedAt: Date.now()
+  };
+}
+async function dmBatchAdd() {
+  var from = $("#dm-add-from").value, to = $("#dm-add-to").value;
+  var inHM = $("#dm-add-in").value, outHM = $("#dm-add-out").value;
+  if (!from || !to) { toast("请选择补录的日期区间", "warn"); return; }
+  if (from > to) { toast("起始日期不能晚于结束日期", "warn"); return; }
+  if (parseHM(inHM) == null || parseHM(outHM) == null) { toast("请填写合法的上/下班时间", "warn"); return; }
+  var skipOff = $("#dm-add-skipoff").checked;
+  var skipHas = $("#dm-add-skiphas").checked;
+  var days = dmDateRange(from, to);
+  if (!days.length) { toast("日期区间无效", "warn"); return; }
+  if (days.length > 400) { toast("区间过大（" + days.length + " 天），请控制在 400 天以内", "warn"); return; }
+  var plan = [], skip = 0, skipOffN = 0;
+  days.forEach(function(dk) {
+    var cfg = dayConfigOf(dk);
+    if (skipOff && cfg.off) { skip++; skipOffN++; return; }
+    var has = (DB.records || []).some(function(r) {
+      return !r.deleted && (r.dateKey || dateKey(new Date(r.time))) === dk;
+    });
+    if (skipHas && has) { skip++; return; }
+    plan.push(dk);
+  });
+  if (!plan.length) { toast("按当前选项没有需要补录的日期", "warn"); return; }
+  var ok = await customConfirm("批量补录",
+      "将为 " + plan.length + " 天各补一对上/下班记录（共 " + (plan.length * 2) + " 条），"
+      + "上班 " + inHM + " / 下班 " + outHM + "。"
+      + "跳过 " + skip + " 天" + (skipOffN ? "（其中休息日 " + skipOffN + " 天）" : "") + "。"
+      + "补录记录来源标记为 admin，不计入「真实打卡」。", "确认补录");
+  if (!ok) return;
+  dmSnapshot("批量补录 " + plan.length + " 天");
+  var n = 0;
+  plan.forEach(function(dk) {
+    var a = dmMakeRec(dk, "in", inHM);
+    var b = dmMakeRec(dk, "out", outHM);
+    if (a) { DB.records.push(a); n++; }
+    if (b) { DB.records.push(b); n++; }
+  });
+  dmAfterWrite();
+  toast("已补录 " + n + " 条（" + plan.length + " 天）", "ok");
+}
+
+// ---- 清理墓碑 / 清空全部 ----
+async function dmPurge() {
+  var dead = (DB.records || []).filter(function(r) { return r.deleted; });
+  if (!dead.length) { toast("没有已删除的墓碑记录", "ok"); return; }
+  var ok = await customConfirm("清理墓碑",
+      "将永久删除 " + dead.length + " 条已删除记录，无法逐条恢复（会先存快照，仍可整体撤销一次）。",
+      "永久清理");
+  if (!ok) return;
+  dmSnapshot("清理墓碑 " + dead.length + " 条");
+  DB.records = (DB.records || []).filter(function(r) { return !r.deleted; });
+  dmAfterWrite();
+  toast("已永久清理 " + dead.length + " 条", "ok");
+}
+async function dmClearAll() {
+  var act = (DB.records || []).filter(function(r) { return !r.deleted; });
+  if (!act.length) { toast("当前没有有效记录", "warn"); return; }
+  var ok = await customConfirm("清空全部打卡记录",
+      "将删除全部 " + act.length + " 条有效记录（软删除，可撤销）。"
+      + "设置项（时薪/班次/工作地点）不受影响。", "确认清空");
+  if (!ok) return;
+  dmSnapshot("清空全部 " + act.length + " 条");
+  var now = Date.now();
+  act.forEach(function(r) { r.deleted = true; r.updatedAt = now; });
+  dmAfterWrite();
+  toast("已清空 " + act.length + " 条（可撤销）", "bad", 6000);
+}
+
+// ---- 事件绑定 ----
+document.getElementById("open-data-mgr").addEventListener("click", dmOpen);
+$("#dm-back").addEventListener("click", dmClose);
+$("#dm-undo").addEventListener("click", dmUndo);
+
+["#dm-from", "#dm-to"].forEach(function(sel) {
+  $(sel).addEventListener("change", function() {
+    dmF.from = $("#dm-from").value;
+    dmF.to = $("#dm-to").value;
+    dmRefresh();
+  });
+});
+$("#dm-type").addEventListener("change", function() { dmF.type = this.value; dmRefresh(); });
+$("#dm-state").addEventListener("change", function() { dmF.state = this.value; dmRefresh(); });
+
+function dmQuick(days) {
+  var today = new Date();
+  var to = dateKey(today);
+  var from;
+  if (days === 0) { from = ""; }
+  else if (days === -1) { from = to.slice(0, 7) + "-01"; }
+  else { from = dateKey(new Date(today.getTime() - (days - 1) * 86400000)); }
+  dmF.from = from; dmF.to = to;
+  $("#dm-from").value = from;
+  $("#dm-to").value = to;
+  dmRefresh();
+}
+$("#dm-quick-7").addEventListener("click", function() { dmQuick(7); });
+$("#dm-quick-30").addEventListener("click", function() { dmQuick(30); });
+$("#dm-quick-month").addEventListener("click", function() { dmQuick(-1); });
+$("#dm-quick-all").addEventListener("click", function() { dmQuick(0); });
+
+$("#dm-sel-all").addEventListener("click", function() {
+  dmFiltered().slice(0, DM_LIST_LIMIT).forEach(function(r) { dmSel[dmKey(r)] = true; });
+  dmRenderList(); dmRenderHit();
+});
+$("#dm-sel-none").addEventListener("click", function() {
+  dmSel = Object.create(null);
+  dmRenderList(); dmRenderHit();
+});
+$("#dm-list").addEventListener("change", function(e) {
+  var cb = e.target.closest("[data-dmk]");
+  if (!cb) return;
+  var k = cb.getAttribute("data-dmk");
+  if (cb.checked) dmSel[k] = true; else delete dmSel[k];
+  dmRenderHit();
+});
+
+$("#dm-del").addEventListener("click", dmDelete);
+$("#dm-restore").addEventListener("click", dmRestore);
+$("#dm-shift-apply").addEventListener("click", dmShiftMinutes);
+$("#dm-set-time-apply").addEventListener("click", dmSetTime);
+$("#dm-move-apply").addEventListener("click", dmMoveDate);
+$("#dm-add-apply").addEventListener("click", dmBatchAdd);
+$("#dm-purge").addEventListener("click", dmPurge);
+$("#dm-clear").addEventListener("click", dmClearAll);
+$("#dm-export").addEventListener("click", function() { exportJSON(); });
+$("#dm-import").addEventListener("click", function() { $("#import-file").click(); });
+$("#dm-csv").addEventListener("click", function() {
+  if (typeof exportCSV === "function") exportCSV(); else toast("CSV 导出不可用", "warn");
 });
 
 // 设置页面打开/关闭
