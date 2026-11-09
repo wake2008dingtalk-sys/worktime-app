@@ -1229,7 +1229,11 @@ function cfgTimesFor(dk, cfg) {
     setMin = (endMs - startMs) / 60000;
     endStr = cfg.end;
   } else {
-    setMin = (parseFloat(DB.dailyHours) || 8) * 60;
+    /* v1.1.16：下班时间为空时，班次时长原本直接取实时的 DB.dailyHours，
+       于是"改每日工时"仍会倒改已完成的记录（8h→4h 就把 450 分钟削成 210）。
+       快照里带上 hours 后，优先用记录自己的那份。 */
+    const hSrc = (cfg && cfg.hours != null) ? cfg.hours : DB.dailyHours;
+    setMin = (parseFloat(hSrc) || 8) * 60;
     endMs = startMs + setMin * 60000;
     endStr = fmtTime(endMs);
   }
@@ -1257,7 +1261,10 @@ function recordCfgSnapshot(dk, db) {
     breakMin: Math.max(0, parseInt(c.breakMin) || 0),
     rate: (c.rate != null ? c.rate : (db.payRate || 0)),
     mode: c.mode || "shift",
-    off: !!c.off
+    off: !!c.off,
+    /* v1.1.16：下班时间为空的日子，班次时长由「每日工时」推导，
+       必须一起固化，否则改每日工时仍会倒改这些记录。 */
+    hours: (c.hours != null ? parseFloat(c.hours) : parseFloat(db.dailyHours)) || 8
   };
 }
 // 给缺少 cfg 的旧记录补快照（一次性，只加字段不改任何已存在的值）
@@ -1266,10 +1273,20 @@ function backfillRecordCfg(db) {
   if (!db || !Array.isArray(db.records)) return 0;
   let n = 0;
   db.records.forEach(function(r) {
-    if (!r || r.cfg && typeof r.cfg === "object") return;
-    const dk = r.dateKey || dateKey(new Date(r.time));
-    r.cfg = recordCfgSnapshot(dk, db);
-    n++;
+    if (!r) return;
+    if (!r.cfg || typeof r.cfg !== "object") {
+      const dk = r.dateKey || dateKey(new Date(r.time));
+      r.cfg = recordCfgSnapshot(dk, db);
+      n++;
+      return;
+    }
+    /* v1.1.16：v1.1.15 及更早写下的快照没有 hours 字段，
+       导致「下班时间为空」的那些日子仍会跟着每日工时变化。
+       这里按升级当刻的值补一次，此后就固定了（只补字段，不改已有值）。 */
+    if (r.cfg.hours == null) {
+      r.cfg.hours = parseFloat(db.dailyHours) || 8;
+      n++;
+    }
   });
   return n;
 }
@@ -1286,7 +1303,7 @@ function migrateToV3(db) {
     const c = _liveConfigFor(db, dk);
     db.dayConfigMap[dk] = {
       start: c.start, end: c.end, breakMin: c.breakMin, rate: c.rate, mode: c.mode,
-      off: c.off, frozen: true, _legacy: true
+      off: c.off, hours: parseFloat(db.dailyHours) || 8, frozen: true, _legacy: true
     };
   });
   return db;
@@ -1541,9 +1558,25 @@ function computeShifts(records, dayStart, dayEnd, breakMinutes, cfgOverride) {
     }
   });
   const sorted = shifts.sort((a, b) => a.in - b.in);
-  // 每日封顶：shift 模式合计 ≤ 目标工时（防补录/重复打卡翻倍）；
-  // actual 模式只做 24h 合理性封顶，让加班如实体现
-  let remaining = effMode === "actual" ? 24 * 60 : targetMin;
+  /* v1.1.16：封顶额度与封顶口径也必须取「记录快照」。
+     原实现这里用实时的 effMode / targetMin，于是 v1.1.14 只稳住了"单班时长"，
+     一旦改设置（每日工时、上下班时间、计薪方式），已完成的当天记录仍会被
+     重新封顶：07:00-19:00 记满 690 分钟，把班次改成 09:00-18:00 后变成 510 分钟。
+     现在按当天每条上班记录自带快照里的班次目标取最大值作为封顶额度，
+     口径也按第一条上班记录的快照，改设置不再影响已产生的记录。
+     仍保留"防翻倍"语义：多条重复打卡不会各自顶格相加。 */
+  let capMode = effMode, capTarget = targetMin;
+  if (inRs.length) {
+    let maxTarget = 0;
+    inRs.forEach(rIn => {
+      const k = ctxOf(rIn);
+      maxTarget = Math.max(maxTarget, Math.max(0, Math.round(k.t.setMin - k.brk)));
+    });
+    const k0 = ctxOf(inRs[0]);
+    capMode = k0.off ? "actual" : k0.mode;
+    capTarget = maxTarget;
+  }
+  let remaining = capMode === "actual" ? 24 * 60 : capTarget;
   sorted.forEach(s => {
     s.minutes = Math.min(s.minutes, Math.max(0, remaining));
     remaining -= s.minutes;
@@ -2029,7 +2062,7 @@ function resetDB() {
 }
 
 /* ===================== v3 功能实现（任务书第 4/5/7 批）===================== */
-var APP_VERSION = "1.1.15"; // v1.1.15：新增「总数据管理」（设置 → 数据管理）——①全屏管理页：数据总览（有效/墓碑条数、覆盖天数、累计工时与金额）+ 日期区间/类型/状态筛选 + 逐条勾选（不勾则作用于筛选命中的全部）；②批量修改：时间平移（±分钟）、统一时刻、整体改期，跨日改动自动按目标日期重固化 cfg 快照；③软删除与恢复，只动选中的记录，不连带其它日期；④批量补录：按日期区间逐日补一对上下班，可跳过休息日与已有记录，来源标记 admin 且不伪造工作地点坐标；⑤清理墓碑、清空全部（软删除，设置项不受影响）；⑥每次写操作前把 records 整份快照存到独立 key（不进 DB/备份/云同步），可整体撤销一步；v1.1.14：设置不再影响历史——①每条记录产生时固化 cfg 快照（班次/午休/时薪/计薪方式），计算工时与金额时优先用记录自带快照，改设置只影响之后的新记录；②概览/记录列表/统计表的金额改为按各班次自己的时薪累加；③迟到判定改用该次签到时的班次快照；④旧记录自动补快照（backfillRecordCfg），从此不再漂移；⑤单日班次编辑器仍会同步该日记录（显式按日修正）；v1.1.13：修复工时/休息日/周期班次——①周期班次与单日班次保存时休息日不再被丢弃（勾「休」可不填时间）②00:00 被 falsy 误判为非法的所有校验改为 == null 判断（零点班可用）③休息日不再产生金额（概览/记录列表/月度统计全部不计薪，且不进月收入合计）④未签退的班次不再预付整班工时（未到下班时间只计已出勤时长）；v1.1.12：未到工作区禁止任何签到记录操作——新增 checkRecordGate() 统一闸门（工作地已设置+定位有效+定位≤60秒新鲜+在围栏内），接入 addRecord/doCheck/补录三处；签退不再"随处可签"；补录改存真实坐标；v1.1.11：云函数调用超时保护（未登录云开发/云函数不可达时搜索不再永久挂起）；v1.1.10：修复搜索无响应——①云函数返回体解包错位导致云路径从不生效 ②识别百度"天配额超限"并立即提示 ③搜索加12秒超时+按钮"搜索中"状态 ④同名匹配防止采纳别家公司坐标 ⑤搜索结果缓存降低配额消耗 ⑥输入联想防抖300→500ms、门槛2→3字；v1.1.9：修复工作地定位——①拒绝行政区级(城市/区县)坐标入库 ②「设为当前位置」主动取新鲜GPS ③原生地图红标/围栏跟随工作地变更 ④红标可拖拽回写坐标 ⑤修正原生地图WGS84/BD09坐标偏移
+var APP_VERSION = "1.1.16"; // v1.1.16：修复两处——①当日已完成记录仍被设置倒改：computeShifts 的「每日封顶额度/封顶口径」原先取实时配置（targetMin/effMode），改班次或每日工时后已完成的班次会被重新削顶（07:00-19:00 已记 690 分钟，改成 09:00-18:00 后变 510）；现改为按当天每条上班记录自带快照的班次目标取最大值来封顶、口径按首条快照，快照新增 hours 固化「每日工时」，旧记录升级时补一次；②云同步「假成功」：syncSettings/syncRecords/syncFromCloud 改为返回结构化结果（ok/uploaded/code/msg），任何一步云函数返回非 0 都明确提示是哪一步、错误码与消息，不再无条件弹「数据同步完成」；上传载荷补带 cfg 快照与 adminAdd，小程序端不会再用它那边的实时设置重算工时；重新绑定成功后重置全部记录的 syncedAt 以触发全量重传（此前换绑后本地记录都标着「已同步」，一条都不传 → 小程序永远空白），并新增「全量重传」按钮；上传成功但云端读回 0 条时提示核对是否同一个微信号；v1.1.15：新增「总数据管理」（设置 → 数据管理）——①全屏管理页：数据总览（有效/墓碑条数、覆盖天数、累计工时与金额）+ 日期区间/类型/状态筛选 + 逐条勾选（不勾则作用于筛选命中的全部）；②批量修改：时间平移（±分钟）、统一时刻、整体改期，跨日改动自动按目标日期重固化 cfg 快照；③软删除与恢复，只动选中的记录，不连带其它日期；④批量补录：按日期区间逐日补一对上下班，可跳过休息日与已有记录，来源标记 admin 且不伪造工作地点坐标；⑤清理墓碑、清空全部（软删除，设置项不受影响）；⑥每次写操作前把 records 整份快照存到独立 key（不进 DB/备份/云同步），可整体撤销一步；v1.1.14：设置不再影响历史——①每条记录产生时固化 cfg 快照（班次/午休/时薪/计薪方式），计算工时与金额时优先用记录自带快照，改设置只影响之后的新记录；②概览/记录列表/统计表的金额改为按各班次自己的时薪累加；③迟到判定改用该次签到时的班次快照；④旧记录自动补快照（backfillRecordCfg），从此不再漂移；⑤单日班次编辑器仍会同步该日记录（显式按日修正）；v1.1.13：修复工时/休息日/周期班次——①周期班次与单日班次保存时休息日不再被丢弃（勾「休」可不填时间）②00:00 被 falsy 误判为非法的所有校验改为 == null 判断（零点班可用）③休息日不再产生金额（概览/记录列表/月度统计全部不计薪，且不进月收入合计）④未签退的班次不再预付整班工时（未到下班时间只计已出勤时长）；v1.1.12：未到工作区禁止任何签到记录操作——新增 checkRecordGate() 统一闸门（工作地已设置+定位有效+定位≤60秒新鲜+在围栏内），接入 addRecord/doCheck/补录三处；签退不再"随处可签"；补录改存真实坐标；v1.1.11：云函数调用超时保护（未登录云开发/云函数不可达时搜索不再永久挂起）；v1.1.10：修复搜索无响应——①云函数返回体解包错位导致云路径从不生效 ②识别百度"天配额超限"并立即提示 ③搜索加12秒超时+按钮"搜索中"状态 ④同名匹配防止采纳别家公司坐标 ⑤搜索结果缓存降低配额消耗 ⑥输入联想防抖300→500ms、门槛2→3字；v1.1.9：修复工作地定位——①拒绝行政区级(城市/区县)坐标入库 ②「设为当前位置」主动取新鲜GPS ③原生地图红标/围栏跟随工作地变更 ④红标可拖拽回写坐标 ⑤修正原生地图WGS84/BD09坐标偏移
 const WEEKDAY_NAMES = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
 
 // ---- 通用自绘弹层：确认 / 输入（替代系统 confirm/prompt）----
@@ -2265,6 +2298,7 @@ function saveShiftEditor() {
     rate: (baseCfg.rate != null ? baseCfg.rate : DB.payRate),
     mode: $("#se-mode").value || "shift",
     off: off,
+    hours: (baseCfg.hours != null ? baseCfg.hours : (parseFloat(DB.dailyHours) || 8)),
     frozen: dk < dateKey(new Date())
   };
   DB.dayConfigMap[dk] = newCfg;
@@ -2277,7 +2311,7 @@ function saveShiftEditor() {
     if ((r.dateKey || dateKey(new Date(r.time))) !== dk) return;
     r.cfg = {
       start: newCfg.start, end: newCfg.end, breakMin: newCfg.breakMin,
-      rate: newCfg.rate, mode: newCfg.mode, off: newCfg.off
+      rate: newCfg.rate, mode: newCfg.mode, off: newCfg.off, hours: newCfg.hours
     };
     r.updatedAt = Date.now();
     touched++;
@@ -5952,7 +5986,14 @@ function initAIChat() {
         // v107修复：持久化绑定码，后续 sync/updateSettings 调用附带它供云函数鉴权
         localStorage.setItem("bound_bind_code", bindData.bindCode);
         localStorage.removeItem("pending_bind_code");
-        toast("设备绑定成功，开始云同步", "ok");
+        /* v1.1.16：绑定（含重新绑定）成功后必须全量重传。
+           增量游标按每条记录的 syncedAt，换绑/换微信号后云端是新的数据集，
+           本地记录却都标着"已同步"，导致一条都不传——小程序侧永远空白。 */
+        let reset = 0;
+        (DB.records || []).forEach(function(r) { r.syncedAt = 0; reset++; });
+        _settingsDirty = true;
+        saveDB();
+        toast("设备绑定成功，开始全量云同步（" + reset + " 条记录）", "ok", 4000);
         startAutoSync();
         return res.data;
       }
@@ -6017,10 +6058,10 @@ function initAIChat() {
 
   // 同步设置到云端
   async function syncSettingsToCloud() {
-    if (!cloudSyncState.isLoggedIn || !cloudSyncState.openid) return;
+    if (!cloudSyncState.isLoggedIn || !cloudSyncState.openid) return { ok: false, skipped: "未绑定" };
     // v107修复：设置未真实变更时不上传——此前每次同步都推进 updatedAt，
     // 云端 >= 比较导致小程序端的设置修改永远被 APK 覆盖
-    if (!_settingsDirty) { Logger.debug("Settings unchanged, skip upload"); return; }
+    if (!_settingsDirty) { Logger.debug("Settings unchanged, skip upload"); return { ok: true, changed: false }; }
 
     try {
       const settings = {
@@ -6058,15 +6099,22 @@ function initAIChat() {
       if (res.code === 0) {
         _settingsDirty = false;
         Logger.debug("Settings synced to cloud");
+        return { ok: true, changed: true };
       }
+      /* v1.1.16：把云函数真实返回码/消息透出来。
+         原实现 code !== 0 时什么都不做，上层照样提示"同步完成"，
+         于是"APK 说同步好了、小程序没数据"这种假成功查不出原因。 */
+      Logger.warn("updateSettings 返回非 0:", res && res.code, res && (res.msg || res.message));
+      return { ok: false, code: res && res.code, msg: (res && (res.msg || res.message)) || "" };
     } catch (e) {
       Logger.error("syncSettingsToCloud error:", e);
+      return { ok: false, err: (e && (e.message || e.errMsg)) || String(e) };
     }
   }
 
   // 同步记录到云端
   async function syncRecordsToCloud() {
-    if (!cloudSyncState.isLoggedIn || !cloudSyncState.openid) return;
+    if (!cloudSyncState.isLoggedIn || !cloudSyncState.openid) return { ok: false, skipped: "未绑定" };
 
     try {
       const records = DB.records || [];
@@ -6075,7 +6123,7 @@ function initAIChat() {
       // 置为当前时间——同步之后新打卡永不补传；②编辑历史记录（time 不变）漏传；
       // ③删除动作无墓碑可传，云端记录复活
       const pendingRecords = records.filter(r => !r.syncedAt || (r.updatedAt || r.time) > r.syncedAt);
-      if (pendingRecords.length === 0) return;
+      if (pendingRecords.length === 0) return { ok: true, uploaded: 0, pending: 0, total: records.length };
 
       const res = await cloudCall("sync", {
         direction: "upload",
@@ -6091,6 +6139,12 @@ function initAIChat() {
           source: r.source || "auto",
           deleted: r.deleted === true, // v107修复：软删除墓碑随上传传播
           updatedAt: r.updatedAt || r.time,
+          /* v1.1.16：一并上传该记录产生时的配置快照。
+             此前只传时间与坐标，小程序/网页端拿不到快照，只能用它自己那边的
+             实时设置重算工时金额——同一条记录在两端口径不一致，看起来就像
+             "同步过去的数据不对"。 */
+          cfg: r.cfg || null,
+          adminAdd: r.adminAdd === true,
           deviceId: cloudSyncState.deviceId
         })),
         deviceId: cloudSyncState.deviceId,
@@ -6104,15 +6158,20 @@ function initAIChat() {
         cloudSyncState.lastSync = now;
         localStorage.setItem("cloud_last_sync", cloudSyncState.lastSync);
         Logger.debug(`Synced ${pendingRecords.length} records to cloud`);
+        return { ok: true, uploaded: pendingRecords.length, total: records.length };
       }
+      Logger.warn("sync 上传返回非 0:", res && res.code, res && (res.msg || res.message));
+      return { ok: false, code: res && res.code, msg: (res && (res.msg || res.message)) || "",
+               attempted: pendingRecords.length };
     } catch (e) {
       Logger.error("syncRecordsToCloud error:", e);
+      return { ok: false, err: (e && (e.message || e.errMsg)) || String(e) };
     }
   }
 
   // 从云端下载设置和记录
   async function syncFromCloud() {
-    if (!cloudSyncState.isLoggedIn || !cloudSyncState.openid) return;
+    if (!cloudSyncState.isLoggedIn || !cloudSyncState.openid) return { ok: false, skipped: "未绑定" };
 
     try {
       const res = await cloudCall("sync", {
@@ -6167,7 +6226,9 @@ function initAIChat() {
         // 合并记录（v107修复：合并键 id 优先、dateKey_type_time 兜底——
         // 本地记录此前缺 dateKey，键恒为 undefined_in_… 与云端永不命中，同一打卡每次下载翻倍；
         // 软删除墓碑双向传播，云端 deleted:true 会同步标记本地记录）
+        let mergedCount = 0, cloudTotal = 0;
         if (records && records.length > 0) {
+          cloudTotal = records.length;
           let changed = false;
           records.forEach(r => {
             if (!r || typeof r.time !== "number") return;
@@ -6191,6 +6252,7 @@ function initAIChat() {
             }
           });
           if (changed) {
+            mergedCount = records.length;
             DB.records.sort((a, b) => b.time - a.time);
             saveDB();
             renderAll();
@@ -6200,34 +6262,80 @@ function initAIChat() {
 
         cloudSyncState.lastSync = Date.now();
         localStorage.setItem("cloud_last_sync", cloudSyncState.lastSync);
+        return { ok: true, merged: mergedCount, cloudTotal: cloudTotal, cloudSettings: !!settings };
       }
+      Logger.warn("sync 下载返回非 0:", res && res.code, res && (res.msg || res.message));
+      return { ok: false, code: res && res.code, msg: (res && (res.msg || res.message)) || "" };
     } catch (e) {
       Logger.error("syncFromCloud error:", e);
+      return { ok: false, err: (e && (e.message || e.errMsg)) || String(e) };
     }
   }
 
   // 双向同步（上传本地 + 下载云端）
-  async function bidirectionalSync() {
+  async function bidirectionalSync(opts) {
+    const silent = !!(opts && opts.silent);
     if (!cloudSyncState.isLoggedIn) {
       Logger.debug("Not logged in, skip sync");
-      return;
+      if (!silent) toast("尚未绑定微信，无法同步。请先在设置里绑定", "warn", 5000);
+      return { ok: false, reason: "not_bound" };
     }
-    
-    toast("正在同步数据...", "ok", 1500);
-    
+
+    if (!silent) toast("正在同步数据...", "ok", 1500);
+
+    let st = { ok: true }, up = { ok: true, uploaded: 0 }, dn = { ok: true };
     try {
       // 先上传本地数据
-      await syncSettingsToCloud();
-      await syncRecordsToCloud();
-      
+      st = (await syncSettingsToCloud()) || { ok: true };
+      up = (await syncRecordsToCloud()) || { ok: true, uploaded: 0 };
       // 再下载云端数据
-      await syncFromCloud();
-      
-      toast("数据同步完成", "ok");
+      dn = (await syncFromCloud()) || { ok: true };
     } catch (e) {
       Logger.error("bidirectionalSync error:", e);
-      toast("同步失败，请检查网络", "warn");
+      if (!silent) toast("同步失败：" + ((e && (e.message || e.errMsg)) || e), "bad", 7000);
+      return { ok: false, err: String(e) };
     }
+
+    /* v1.1.16：不再无条件报"同步完成"。
+       任何一步返回非 0 都必须如实说明是哪一步、错误码是什么——
+       之前的假成功让人无法判断"小程序没数据"到底卡在上传、鉴权还是下载。 */
+    const bad = [["设置", st], ["记录上传", up], ["数据下载", dn]]
+      .find(([, r]) => r && r.ok === false && !r.skipped);
+    if (bad) {
+      const [step, r] = bad;
+      const detail = (r.code != null)
+        ? ("错误码 " + r.code + (r.msg ? "：" + r.msg : ""))
+        : (r.err || window._lastCloudErr || "网络或云函数不可达");
+      Logger.warn("同步失败步骤:", step, r);
+      if (!silent) toast(step + "失败 · " + detail, "bad", 8000);
+      return { ok: false, step: step, code: r.code, msg: detail };
+    }
+
+    if (up.uploaded > 0 && dn.cloudTotal === 0) {
+      // 上传成功但云端立刻读回 0 条：典型是两端不在同一账号/绑定关系下
+      if (!silent) toast("已上传 " + up.uploaded + " 条，但云端读回 0 条——请确认小程序登录的是同一个微信号", "warn", 9000);
+      return { ok: false, step: "云端校验", msg: "uploaded but cloud empty" };
+    }
+
+    if (!silent) {
+      toast("同步完成：上传 " + (up.uploaded || 0) + " 条 · 云端 " + (dn.cloudTotal || 0) + " 条"
+        + (st.changed ? " · 设置已更新" : ""), "ok", 4500);
+    }
+    return { ok: true, uploaded: up.uploaded || 0, cloudTotal: dn.cloudTotal || 0 };
+  }
+
+  /* v1.1.16：全量重传。
+     增量游标按每条记录的 syncedAt 判断，换绑新绑定码/换微信号/重装后
+     云端是另一份数据集，而本地记录都标着"已同步"，于是一条都不传，
+     表现出来就是"APK 说同步完成、小程序永远是空的"。 */
+  async function forceFullResync() {
+    if (!cloudSyncState.isLoggedIn) { toast("请先绑定微信后再试", "warn", 5000); return; }
+    const n = (DB.records || []).length;
+    (DB.records || []).forEach(function(r) { r.syncedAt = 0; });
+    _settingsDirty = true;
+    saveDB();
+    toast("已重置 " + n + " 条记录的同步标记，开始全量上传…", "ok", 3000);
+    await bidirectionalSync();
   }
 
   // 启动自动同步（每30分钟）
@@ -6237,8 +6345,8 @@ function initAIChat() {
     }
     // 立即同步一次
     bidirectionalSync();
-    // 每30分钟同步
-    cloudSyncState.syncInterval = setInterval(bidirectionalSync, 30 * 60 * 1000);
+    // 每30分钟同步（后台轮询静默执行，失败不打扰）
+    cloudSyncState.syncInterval = setInterval(function() { bidirectionalSync({ silent: true }); }, 30 * 60 * 1000);
     Logger.debug("Auto sync started, interval=30min");
   }
 
@@ -6276,10 +6384,16 @@ function initAIChat() {
           <span class="cloud-dot"></span>
           <span>已绑定微信 (${(cloudSyncState.openid || "").substr(0, 8)}...)</span>
           <button class="fbtn" id="btn-sync-now">立即同步</button>
+          <button class="fbtn" id="btn-full-resync">全量重传</button>
           <button class="fbtn" id="btn-unbind">解绑</button>
         </div>
+        <div class="hint" style="margin-top:6px;font-size:10.5px">
+          账号 ${escapeHtml((cloudSyncState.openid || "").split("").slice(-6).join(""))}… · 设备 ${escapeHtml((cloudSyncState.deviceId || "").slice(0, 10))}…
+          · 小程序需登录同一微信号才能看到这份数据
+        </div>
       `;
-      $("#btn-sync-now").addEventListener("click", bidirectionalSync);
+      $("#btn-sync-now").addEventListener("click", function() { bidirectionalSync(); });
+      $("#btn-full-resync").addEventListener("click", forceFullResync);
       $("#btn-unbind").addEventListener("click", () => {
         if (confirm("确定解除绑定吗？解绑后数据不再同步")) {
           cloudSyncState.isLoggedIn = false;
@@ -6367,6 +6481,7 @@ function initAIChat() {
     // v111fix7：供早退确认流程标记设置变更（dailyEndTimeMap 改动需同步）
     markSettingsDirty: function() { _settingsDirty = true; },
     bidirectionalSync: bidirectionalSync,
+    forceFullResync: forceFullResync,
     renderCloudBindStatus: renderCloudBindStatus,
     checkBindStatus: checkBindStatus,
     // T6.2：暴露 cloudCall 给 Place 检索等场景复用（匿名登录态 + 云函数）
