@@ -1,5 +1,5 @@
 // v1.1: 缓存名带版本号；移除跨域百度地图脚本（旧 AK 已轮换，且跨域 addAll 会让 install 失败）
-const CACHE_NAME = 'worktime-v7';
+const CACHE_NAME = 'worktime-v8';
 const ASSETS = [
   '/',
   '/index.html'
