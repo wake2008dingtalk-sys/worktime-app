@@ -6152,7 +6152,8 @@ function initAIChat() {
      串行发 10 批就是 10 倍排队。3 路并发只增加并发度、不放大单次请求体，
      总耗时压到约 1/3；微信云开发的函数并发配额远高于 3，不会打满。 */
   const UPLOAD_CONCURRENCY = 3;
-  function _recPayload(r) {
+  function _recPayload(r, opts) {
+    const noCfg = !!(opts && opts.noCfg);
     const p = {
       id: r.id || undefined,
       dateKey: r.dateKey || dateKey(new Date(r.time)),
@@ -6174,7 +6175,7 @@ function initAIChat() {
          Cannot create field 'breakMin' in element {cfg: null}
        而且是整批一起失败（一次 update 里多条 write error）。
        不发这个字段就完全绕开点路径展开，旧文档里的 cfg 保持原样。 */
-    if (r.cfg && typeof r.cfg === "object") p.cfg = r.cfg;
+    if (!noCfg && r.cfg && typeof r.cfg === "object") p.cfg = r.cfg;
     return p;
   }
 
@@ -6209,17 +6210,36 @@ function initAIChat() {
           if (idx >= batches.length) return;
           const batch = batches[idx];
           chunks++;
-          let res = null, thrown = "";
-          try {
-            res = await cloudCall("sync", {
+          const pushBatch = function (opts) {
+            return cloudCall("sync", {
               direction: "upload",
               dataType: "records",
-              records: batch.map(_recPayload),
+              records: batch.map(function (r) { return _recPayload(r, opts); }),
               deviceId: cloudSyncState.deviceId,
               bindCode: localStorage.getItem("bound_bind_code") || ""
             });
+          };
+          let res = null, thrown = "";
+          try {
+            res = await pushBatch();
           } catch (e) {
             thrown = (e && (e.message || e.errMsg)) || String(e);
+          }
+          /* v1.1.20：容错兜底。若云端那条旧文档的 cfg 是 null，写 cfg 对象会被
+             "Cannot create field 'breakMin' …" 拒绝（云数据库把嵌套对象拆成点路径）。
+             云函数补丁能根治，但万一还没部署，这里去掉 cfg 再试一次——
+             宁可这条记录的快照晚点补，也别让整批同步卡死。 */
+          const cfgErr = !thrown && res && res.code !== 0 &&
+            /Cannot create field|502001/i.test(String((res && (res.msg || res.message)) || ""));
+          if (cfgErr) {
+            Logger.warn("cfg 点路径冲突，去掉 cfg 重试第 " + (idx + 1) + " 批");
+            try {
+              const retry = await pushBatch({ noCfg: true });
+              if (retry && retry.code === 0) { res = retry; thrown = ""; }
+              else res = retry || res;
+            } catch (e2) {
+              thrown = (e2 && (e2.message || e2.errMsg)) || String(e2);
+            }
           }
           if (thrown || !res || res.code !== 0) {
             Logger.warn("sync 上传批次失败:", idx + 1, thrown || (res && res.code));
