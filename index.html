@@ -2092,7 +2092,7 @@ function resetDB() {
 }
 
 /* ===================== v3 功能实现（任务书第 4/5/7 批）===================== */
-var APP_VERSION = "1.1.18"; // v1.1.18：专治「APK 说同步完成、小程序收不到」——①记录上传分批（每批 30 条，逐批推进游标并落盘）：原实现把所有待传记录连同每条记录的 cfg 快照塞进一次 callFunction，历史一多就超请求体上限；云函数里每条记录还要 1~2 次数据库查询，几百条直接超时，整批失败且游标不推进，下次又整批重来，永远传不完；②上传失败时明确报出「第几批、该批多少条、已成功多少条」，不再是一句含糊的失败；③新增身份一致性校验：下载回来的云端记录带着 _openid，与本地绑定到的 openid 尾号比对，不一致就直接点明「数据写进了另一个身份，小程序看不到」；④新增「自检」按钮：一次跑完绑定态/checkBind/上传/下载/身份比对，输出可一键复制的报告，不用再靠猜；v1.1.17：修复「午休时长仍会倒改已完成记录」——v1.1.16 已让计算走记录快照，但展示与导出仍在读实时设置，于是改设置里的午休时长后，首页「午休扣除 X」、记录列表、月度统计表的「午休 Xmin」/目标工时/完成度、CSV「午休(分钟)」列、按日期编辑弹窗里的「上班/下班/午休」全都跟着变，看起来就是午休还在回写历史。现在 computeShifts 统一汇总出「当天账本口径」shifts.ctx（有记录时来自该记录固化的 cfg 快照，无记录才回落实时配置），上述所有展示与导出口径都改为读它，与工时、金额同源；refreshAfterEdit 中那份会读实时配置的重复概览逻辑改为直接复用 renderOverview；CSV 的时薪/收入也改按班次快照，休息日写 0 并注明；v1.1.16：修复两处——①当日已完成记录仍被设置倒改：computeShifts 的「每日封顶额度/封顶口径」原先取实时配置（targetMin/effMode），改班次或每日工时后已完成的班次会被重新削顶（07:00-19:00 已记 690 分钟，改成 09:00-18:00 后变 510）；现改为按当天每条上班记录自带快照的班次目标取最大值来封顶、口径按首条快照，快照新增 hours 固化「每日工时」，旧记录升级时补一次；②云同步「假成功」：syncSettings/syncRecords/syncFromCloud 改为返回结构化结果（ok/uploaded/code/msg），任何一步云函数返回非 0 都明确提示是哪一步、错误码与消息，不再无条件弹「数据同步完成」；上传载荷补带 cfg 快照与 adminAdd，小程序端不会再用它那边的实时设置重算工时；重新绑定成功后重置全部记录的 syncedAt 以触发全量重传（此前换绑后本地记录都标着「已同步」，一条都不传 → 小程序永远空白），并新增「全量重传」按钮；上传成功但云端读回 0 条时提示核对是否同一个微信号；v1.1.15：新增「总数据管理」（设置 → 数据管理）——①全屏管理页：数据总览（有效/墓碑条数、覆盖天数、累计工时与金额）+ 日期区间/类型/状态筛选 + 逐条勾选（不勾则作用于筛选命中的全部）；②批量修改：时间平移（±分钟）、统一时刻、整体改期，跨日改动自动按目标日期重固化 cfg 快照；③软删除与恢复，只动选中的记录，不连带其它日期；④批量补录：按日期区间逐日补一对上下班，可跳过休息日与已有记录，来源标记 admin 且不伪造工作地点坐标；⑤清理墓碑、清空全部（软删除，设置项不受影响）；⑥每次写操作前把 records 整份快照存到独立 key（不进 DB/备份/云同步），可整体撤销一步；v1.1.14：设置不再影响历史——①每条记录产生时固化 cfg 快照（班次/午休/时薪/计薪方式），计算工时与金额时优先用记录自带快照，改设置只影响之后的新记录；②概览/记录列表/统计表的金额改为按各班次自己的时薪累加；③迟到判定改用该次签到时的班次快照；④旧记录自动补快照（backfillRecordCfg），从此不再漂移；⑤单日班次编辑器仍会同步该日记录（显式按日修正）；v1.1.13：修复工时/休息日/周期班次——①周期班次与单日班次保存时休息日不再被丢弃（勾「休」可不填时间）②00:00 被 falsy 误判为非法的所有校验改为 == null 判断（零点班可用）③休息日不再产生金额（概览/记录列表/月度统计全部不计薪，且不进月收入合计）④未签退的班次不再预付整班工时（未到下班时间只计已出勤时长）；v1.1.12：未到工作区禁止任何签到记录操作——新增 checkRecordGate() 统一闸门（工作地已设置+定位有效+定位≤60秒新鲜+在围栏内），接入 addRecord/doCheck/补录三处；签退不再"随处可签"；补录改存真实坐标；v1.1.11：云函数调用超时保护（未登录云开发/云函数不可达时搜索不再永久挂起）；v1.1.10：修复搜索无响应——①云函数返回体解包错位导致云路径从不生效 ②识别百度"天配额超限"并立即提示 ③搜索加12秒超时+按钮"搜索中"状态 ④同名匹配防止采纳别家公司坐标 ⑤搜索结果缓存降低配额消耗 ⑥输入联想防抖300→500ms、门槛2→3字；v1.1.9：修复工作地定位——①拒绝行政区级(城市/区县)坐标入库 ②「设为当前位置」主动取新鲜GPS ③原生地图红标/围栏跟随工作地变更 ④红标可拖拽回写坐标 ⑤修正原生地图WGS84/BD09坐标偏移
+var APP_VERSION = "1.1.19"; // v1.1.19：提同步速度——①记录上传改 3 路并发（原来批次串行，10 批就是 10 倍排队）；②轮询分级：前台 3 分钟、后台 30 分钟（原来固定 30 分钟），切回前台立即补一次；③下载游标独立成 lastDownloadAt 并持久化（原来与上传共用 lastSync，上传会把游标推到"现在"，漏掉对端刚改的记录）；④空转跳过：没有新东西要传且两分钟内刚下载过，后台轮询不再拉一遍全量；⑤启动预热匿名会话与云函数；⑥打卡后 3 秒合并上传；⑦同步/自检提示补上批次数与耗时；配套云函数补丁：下载改真增量（用起 lastSyncTime，留 10 分钟回看窗口）、上传按 id 批量查存在性（30 条从 30 次读降到 2 次）、回传 total 与 ownerOpenid；v1.1.18：专治「APK 说同步完成、小程序收不到」——①记录上传分批（每批 30 条，逐批推进游标并落盘）：原实现把所有待传记录连同每条记录的 cfg 快照塞进一次 callFunction，历史一多就超请求体上限；云函数里每条记录还要 1~2 次数据库查询，几百条直接超时，整批失败且游标不推进，下次又整批重来，永远传不完；②上传失败时明确报出「第几批、该批多少条、已成功多少条」，不再是一句含糊的失败；③新增身份一致性校验：下载回来的云端记录带着 _openid，与本地绑定到的 openid 尾号比对，不一致就直接点明「数据写进了另一个身份，小程序看不到」；④新增「自检」按钮：一次跑完绑定态/checkBind/上传/下载/身份比对，输出可一键复制的报告，不用再靠猜；v1.1.17：修复「午休时长仍会倒改已完成记录」——v1.1.16 已让计算走记录快照，但展示与导出仍在读实时设置，于是改设置里的午休时长后，首页「午休扣除 X」、记录列表、月度统计表的「午休 Xmin」/目标工时/完成度、CSV「午休(分钟)」列、按日期编辑弹窗里的「上班/下班/午休」全都跟着变，看起来就是午休还在回写历史。现在 computeShifts 统一汇总出「当天账本口径」shifts.ctx（有记录时来自该记录固化的 cfg 快照，无记录才回落实时配置），上述所有展示与导出口径都改为读它，与工时、金额同源；refreshAfterEdit 中那份会读实时配置的重复概览逻辑改为直接复用 renderOverview；CSV 的时薪/收入也改按班次快照，休息日写 0 并注明；v1.1.16：修复两处——①当日已完成记录仍被设置倒改：computeShifts 的「每日封顶额度/封顶口径」原先取实时配置（targetMin/effMode），改班次或每日工时后已完成的班次会被重新削顶（07:00-19:00 已记 690 分钟，改成 09:00-18:00 后变 510）；现改为按当天每条上班记录自带快照的班次目标取最大值来封顶、口径按首条快照，快照新增 hours 固化「每日工时」，旧记录升级时补一次；②云同步「假成功」：syncSettings/syncRecords/syncFromCloud 改为返回结构化结果（ok/uploaded/code/msg），任何一步云函数返回非 0 都明确提示是哪一步、错误码与消息，不再无条件弹「数据同步完成」；上传载荷补带 cfg 快照与 adminAdd，小程序端不会再用它那边的实时设置重算工时；重新绑定成功后重置全部记录的 syncedAt 以触发全量重传（此前换绑后本地记录都标着「已同步」，一条都不传 → 小程序永远空白），并新增「全量重传」按钮；上传成功但云端读回 0 条时提示核对是否同一个微信号；v1.1.15：新增「总数据管理」（设置 → 数据管理）——①全屏管理页：数据总览（有效/墓碑条数、覆盖天数、累计工时与金额）+ 日期区间/类型/状态筛选 + 逐条勾选（不勾则作用于筛选命中的全部）；②批量修改：时间平移（±分钟）、统一时刻、整体改期，跨日改动自动按目标日期重固化 cfg 快照；③软删除与恢复，只动选中的记录，不连带其它日期；④批量补录：按日期区间逐日补一对上下班，可跳过休息日与已有记录，来源标记 admin 且不伪造工作地点坐标；⑤清理墓碑、清空全部（软删除，设置项不受影响）；⑥每次写操作前把 records 整份快照存到独立 key（不进 DB/备份/云同步），可整体撤销一步；v1.1.14：设置不再影响历史——①每条记录产生时固化 cfg 快照（班次/午休/时薪/计薪方式），计算工时与金额时优先用记录自带快照，改设置只影响之后的新记录；②概览/记录列表/统计表的金额改为按各班次自己的时薪累加；③迟到判定改用该次签到时的班次快照；④旧记录自动补快照（backfillRecordCfg），从此不再漂移；⑤单日班次编辑器仍会同步该日记录（显式按日修正）；v1.1.13：修复工时/休息日/周期班次——①周期班次与单日班次保存时休息日不再被丢弃（勾「休」可不填时间）②00:00 被 falsy 误判为非法的所有校验改为 == null 判断（零点班可用）③休息日不再产生金额（概览/记录列表/月度统计全部不计薪，且不进月收入合计）④未签退的班次不再预付整班工时（未到下班时间只计已出勤时长）；v1.1.12：未到工作区禁止任何签到记录操作——新增 checkRecordGate() 统一闸门（工作地已设置+定位有效+定位≤60秒新鲜+在围栏内），接入 addRecord/doCheck/补录三处；签退不再"随处可签"；补录改存真实坐标；v1.1.11：云函数调用超时保护（未登录云开发/云函数不可达时搜索不再永久挂起）；v1.1.10：修复搜索无响应——①云函数返回体解包错位导致云路径从不生效 ②识别百度"天配额超限"并立即提示 ③搜索加12秒超时+按钮"搜索中"状态 ④同名匹配防止采纳别家公司坐标 ⑤搜索结果缓存降低配额消耗 ⑥输入联想防抖300→500ms、门槛2→3字；v1.1.9：修复工作地定位——①拒绝行政区级(城市/区县)坐标入库 ②「设为当前位置」主动取新鲜GPS ③原生地图红标/围栏跟随工作地变更 ④红标可拖拽回写坐标 ⑤修正原生地图WGS84/BD09坐标偏移
 const WEEKDAY_NAMES = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
 
 // ---- 通用自绘弹层：确认 / 输入（替代系统 confirm/prompt）----
@@ -5941,6 +5941,10 @@ function initAIChat() {
     openid: localStorage.getItem("cloud_openid") || "",
     deviceId: localStorage.getItem("device_id") || "",
     lastSync: parseInt(localStorage.getItem("cloud_last_sync") || "0"),
+    /* v1.1.19：下载游标单独一个。以前上传和下载共用一个 lastSync，
+       上传也会把它推到"现在"，于是刚上传完再下载时，窗口前移，
+       会把小程序在那一小段时间里改过的记录漏掉。 */
+    lastDownloadAt: parseInt(localStorage.getItem("cloud_last_download") || "0"),
     syncInterval: null
   };
 
@@ -6009,6 +6013,9 @@ function initAIChat() {
         let reset = 0;
         (DB.records || []).forEach(function(r) { r.syncedAt = 0; reset++; });
         _settingsDirty = true;
+        // v1.1.19：换绑后必须从头下载，否则会沿用旧账号的下载游标，漏掉全部历史
+        cloudSyncState.lastDownloadAt = 0;
+        localStorage.removeItem("cloud_last_download");
         saveDB();
         toast("设备绑定成功，开始全量云同步（" + reset + " 条记录）", "ok", 4000);
         startAutoSync();
@@ -6140,6 +6147,11 @@ function initAIChat() {
      现在每批 30 条、逐批推进游标并落盘：中途失败时已成功的批次不会重传，
      失败批次会明确报出「第几批、错误码」，不再是一句含糊的"同步失败"。 */
   const UPLOAD_CHUNK = 30;
+  /* v1.1.19：一批 30 条、3 路并发。
+     云函数里每条记录是"逐条查库 + 逐条写库"，单批 30 条约 90 次往返；
+     串行发 10 批就是 10 倍排队。3 路并发只增加并发度、不放大单次请求体，
+     总耗时压到约 1/3；微信云开发的函数并发配额远高于 3，不会打满。 */
+  const UPLOAD_CONCURRENCY = 3;
   function _recPayload(r) {
     return {
       id: r.id || undefined,
@@ -6162,10 +6174,11 @@ function initAIChat() {
     };
   }
 
-  // 同步记录到云端（分批）
+  // 同步记录到云端（分批 + 3 路并发）
   async function syncRecordsToCloud() {
     if (!cloudSyncState.isLoggedIn || !cloudSyncState.openid) return { ok: false, skipped: "未绑定" };
 
+    const tStart = Date.now();
     try {
       const records = DB.records || [];
       // v107修复：增量游标改为每条记录的 syncedAt/updatedAt
@@ -6173,49 +6186,76 @@ function initAIChat() {
       // 置为当前时间——同步之后新打卡永不补传；②编辑历史记录（time 不变）漏传；
       // ③删除动作无墓碑可传，云端记录复活
       const pendingRecords = records.filter(r => !r.syncedAt || (r.updatedAt || r.time) > r.syncedAt);
-      if (pendingRecords.length === 0) return { ok: true, uploaded: 0, pending: 0, total: records.length, chunks: 0 };
+      if (pendingRecords.length === 0) return { ok: true, uploaded: 0, pending: 0, total: records.length, chunks: 0, ms: Date.now() - tStart };
 
-      let uploaded = 0, chunks = 0;
+      /* v1.1.19：批次改为 3 路并发。
+         串行时一批要等上一批跑完（云函数里每条记录还要逐条查库+写库），
+         10 批就是 10 倍排队时间。并发 3 路后总耗时约降到 1/3，
+         且不增加任何单批的请求体大小。失败时立即停止领取新批次。 */
+      const batches = [];
       for (let i = 0; i < pendingRecords.length; i += UPLOAD_CHUNK) {
-        const batch = pendingRecords.slice(i, i + UPLOAD_CHUNK);
-        chunks++;
-        const res = await cloudCall("sync", {
-          direction: "upload",
-          dataType: "records",
-          records: batch.map(_recPayload),
-          deviceId: cloudSyncState.deviceId,
-          bindCode: localStorage.getItem("bound_bind_code") || ""
-        });
+        batches.push(pendingRecords.slice(i, i + UPLOAD_CHUNK));
+      }
+      let uploaded = 0, chunks = 0, cursor = 0, failInfo = null;
 
-        if (!res || res.code !== 0) {
-          // 已成功的批次先落盘游标，避免下次整批重来
-          if (uploaded > 0) {
-            const t0 = Date.now();
-            pendingRecords.slice(0, i).forEach(r => { r.syncedAt = t0; });
-            saveDB();
+      const runBatch = async function () {
+        while (true) {
+          if (failInfo) return;              // 已有失败：不再领新批
+          const idx = cursor++;
+          if (idx >= batches.length) return;
+          const batch = batches[idx];
+          chunks++;
+          let res = null, thrown = "";
+          try {
+            res = await cloudCall("sync", {
+              direction: "upload",
+              dataType: "records",
+              records: batch.map(_recPayload),
+              deviceId: cloudSyncState.deviceId,
+              bindCode: localStorage.getItem("bound_bind_code") || ""
+            });
+          } catch (e) {
+            thrown = (e && (e.message || e.errMsg)) || String(e);
           }
-          Logger.warn("sync 上传返回非 0:", res && res.code, res && (res.msg || res.message));
-          return {
-            ok: false, code: res && res.code,
-            msg: (res && (res.msg || res.message)) || "",
-            uploaded: uploaded, chunks: chunks, attempted: pendingRecords.length,
-            failedBatch: chunks, batchSize: batch.length
-          };
+          if (thrown || !res || res.code !== 0) {
+            Logger.warn("sync 上传批次失败:", idx + 1, thrown || (res && res.code));
+            failInfo = {
+              ok: false,
+              code: thrown ? null : (res && res.code),
+              msg: thrown ? "" : ((res && (res.msg || res.message)) || ""),
+              err: thrown,
+              failedBatch: idx + 1,
+              batchSize: batch.length
+            };
+            return;
+          }
+          uploaded += batch.length;
+          const now = Date.now();
+          batch.forEach(r => { r.syncedAt = now; });
+          saveDB(); // 逐批落盘：即使进程被杀也不会把已传过的再传一遍
         }
+      };
 
-        uploaded += batch.length;
-        const now = Date.now();
-        batch.forEach(r => { r.syncedAt = now; });
-        saveDB(); // 逐批落盘：即使进程被杀也不会把已传过的再传一遍
+      const workers = [];
+      for (let w = 0; w < UPLOAD_CONCURRENCY; w++) workers.push(runBatch());
+      await Promise.all(workers);
+
+      if (failInfo) {
+        return Object.assign(failInfo, {
+          uploaded: uploaded, chunks: chunks,
+          attempted: pendingRecords.length, total: records.length,
+          ms: Date.now() - tStart
+        });
       }
 
       cloudSyncState.lastSync = Date.now();
       localStorage.setItem("cloud_last_sync", cloudSyncState.lastSync);
-      Logger.debug(`Synced ${uploaded} records to cloud in ${chunks} chunk(s)`);
-      return { ok: true, uploaded: uploaded, total: records.length, chunks: chunks };
+      const ms = Date.now() - tStart;
+      Logger.debug(`Synced ${uploaded} records to cloud in ${chunks} chunk(s), ${ms}ms`);
+      return { ok: true, uploaded: uploaded, total: records.length, chunks: chunks, ms: ms };
     } catch (e) {
       Logger.error("syncRecordsToCloud error:", e);
-      return { ok: false, err: (e && (e.message || e.errMsg)) || String(e) };
+      return { ok: false, err: (e && (e.message || e.errMsg)) || String(e), uploaded: 0, ms: Date.now() - tStart };
     }
   }
 
@@ -6223,12 +6263,16 @@ function initAIChat() {
   async function syncFromCloud() {
     if (!cloudSyncState.isLoggedIn || !cloudSyncState.openid) return { ok: false, skipped: "未绑定" };
 
+    const tStart = Date.now();
     try {
       const res = await cloudCall("sync", {
         direction: "download",
         dataType: "all",
         deviceId: cloudSyncState.deviceId,
-        lastSyncTime: cloudSyncState.lastSync,
+        /* v1.1.19：带上"上次下载完的时刻"，云函数据此只回增量。
+           以前这个参数传的是共用的 lastSync（上传也会推进它），
+           服务端又完全没用它 —— 于是每次都是全量分页，记录越多越慢。 */
+        lastSyncTime: cloudSyncState.lastDownloadAt || 0,
         bindCode: localStorage.getItem("bound_bind_code") || ""
       });
 
@@ -6282,7 +6326,12 @@ function initAIChat() {
            小程序永远读不到，这是"上传成功但对端空白"最典型的成因，
            以前只能靠猜，现在直接报出来。 */
         let cloudOpenidTail = "";
-        if (Array.isArray(records)) {
+        /* v1.1.19：优先用云函数直接回传的 ownerOpenid（它就是写入时用的身份），
+           比从记录里取样更可靠——增量下载可能一条都不返回，取样会落空。 */
+        if (res.data && res.data.ownerOpenid) {
+          cloudOpenidTail = String(res.data.ownerOpenid).slice(-6);
+        }
+        if (!cloudOpenidTail && Array.isArray(records)) {
           for (let i = 0; i < records.length; i++) {
             const rr = records[i];
             if (rr && rr._openid) { cloudOpenidTail = String(rr._openid).slice(-6); break; }
@@ -6324,7 +6373,14 @@ function initAIChat() {
 
         cloudSyncState.lastSync = Date.now();
         localStorage.setItem("cloud_last_sync", cloudSyncState.lastSync);
-        return { ok: true, merged: mergedCount, cloudTotal: cloudTotal, cloudSettings: !!settings,
+        /* v1.1.19：云函数现在只回增量，并额外回一个 total（该账号云端总条数）。
+           cloudTotal 统一用 total，避免"增量只回 3 条"被误读成"云端只有 3 条"。 */
+        if (res.data && typeof res.data.total === "number") cloudTotal = res.data.total;
+        cloudSyncState.lastDownloadAt = Date.now();
+        localStorage.setItem("cloud_last_download", cloudSyncState.lastDownloadAt);
+        return { ok: true, merged: mergedCount, cloudTotal: cloudTotal,
+                 returned: (records && records.length) || 0,
+                 cloudSettings: !!settings, ms: Date.now() - tStart,
                  cloudOpenidTail: cloudOpenidTail, localOpenidTail: localOpenidTail };
       }
       Logger.warn("sync 下载返回非 0:", res && res.code, res && (res.msg || res.message));
@@ -6347,12 +6403,21 @@ function initAIChat() {
     if (!silent) toast("正在同步数据...", "ok", 1500);
 
     let st = { ok: true }, up = { ok: true, uploaded: 0 }, dn = { ok: true };
+    const tAll = Date.now();
     try {
       // 先上传本地数据
       st = (await syncSettingsToCloud()) || { ok: true };
       up = (await syncRecordsToCloud()) || { ok: true, uploaded: 0 };
-      // 再下载云端数据
-      dn = (await syncFromCloud()) || { ok: true };
+      /* v1.1.19：没有新东西要传、且两分钟内刚下载过，就不必再拉一遍全量。
+         后台静默轮询时这一条能省掉绝大多数空转；手动同步不受影响。 */
+      const fresh = cloudSyncState.lastDownloadAt &&
+        (Date.now() - cloudSyncState.lastDownloadAt < 120000);
+      if (silent && fresh && !(up.uploaded > 0) && !st.changed) {
+        dn = { ok: true, skipped: "fresh" };
+        Logger.debug("Skip download: nothing uploaded & recently synced");
+      } else {
+        dn = (await syncFromCloud()) || { ok: true };
+      }
     } catch (e) {
       Logger.error("bidirectionalSync error:", e);
       if (!silent) toast("同步失败：" + ((e && (e.message || e.errMsg)) || e), "bad", 7000);
@@ -6402,12 +6467,16 @@ function initAIChat() {
                cloudOpenidTail: dn.cloudOpenidTail, localOpenidTail: dn.localOpenidTail };
     }
 
+    const totalMs = Date.now() - tAll;
     if (!silent) {
       toast("同步完成：上传 " + (up.uploaded || 0) + " 条" + (up.chunks ? "（" + up.chunks + " 批）" : "")
-        + " · 云端 " + (dn.cloudTotal || 0) + " 条"
-        + (st.changed ? " · 设置已更新" : ""), "ok", 4500);
+        + " · 云端共 " + (dn.cloudTotal || 0) + " 条"
+        + (dn.returned != null && dn.returned !== dn.cloudTotal ? "（本次新增/变更 " + dn.returned + "）" : "")
+        + (st.changed ? " · 设置已更新" : "")
+        + " · 耗时 " + (totalMs / 1000).toFixed(1) + "s", "ok", 4500);
     }
-    return { ok: true, uploaded: up.uploaded || 0, cloudTotal: dn.cloudTotal || 0 };
+    return { ok: true, uploaded: up.uploaded || 0, cloudTotal: dn.cloudTotal || 0,
+             returned: dn.returned, ms: totalMs };
   }
 
   /* v1.1.16：全量重传。
@@ -6419,6 +6488,8 @@ function initAIChat() {
     const n = (DB.records || []).length;
     (DB.records || []).forEach(function(r) { r.syncedAt = 0; });
     _settingsDirty = true;
+    cloudSyncState.lastDownloadAt = 0;          // 顺带重新拉一遍云端全量
+    localStorage.removeItem("cloud_last_download");
     saveDB();
     toast("已重置 " + n + " 条记录的同步标记，开始全量上传…", "ok", 3000);
     await bidirectionalSync();
@@ -6499,55 +6570,62 @@ function initAIChat() {
     if (up.skipped) {
       L.push("[上传] 跳过：" + up.skipped);
     } else if (up.ok) {
-      L.push("[上传] 成功 " + (up.uploaded || 0) + " 条（" + (up.chunks || 0) + " 批），本地共 "
+      L.push("[上传] 成功 " + (up.uploaded || 0) + " 条（" + (up.chunks || 0) + " 批，并发 "
+        + UPLOAD_CONCURRENCY + "，耗时 " + ((up.ms || 0) / 1000).toFixed(2) + "s），本地共 "
         + (up.total || 0) + " 条");
     } else {
       L.push("[上传] 失败 code=" + (up.code != null ? up.code : "-") + " msg=" + (up.msg || up.err || "-")
-        + (up.failedBatch ? "（第 " + up.failedBatch + " 批，" + up.batchSize + " 条/批；已成功 " + up.uploaded + " 条）" : ""));
+        + (up.failedBatch ? "（第 " + up.failedBatch + " 批，每批 " + up.batchSize + " 条；已成功 " + up.uploaded + " 条，耗时 " + ((up.ms || 0) / 1000).toFixed(2) + "s）" : ""));
     }
     L.push("");
 
-    // ③ 下载探针
-    let dn = null, dnErr = "";
+    // ③ 下载探针（带上次下载游标，顺带验证增量是否生效）
+    let dn = null, dnErr = "", dnMs = 0;
+    const dnT0 = Date.now();
     try {
       dn = await cloudCall("sync", { direction: "download", dataType: "all",
-        deviceId: cloudSyncState.deviceId, bindCode: bindCode });
+        deviceId: cloudSyncState.deviceId, lastSyncTime: cloudSyncState.lastDownloadAt || 0,
+        bindCode: bindCode });
     } catch (e) { dnErr = (e && (e.message || e.errMsg)) || String(e); }
-    let cloudRecs = [];
+    dnMs = Date.now() - dnT0;
+    let cloudRecs = [], cloudTotalNum = 0;
     if (dnErr) {
       L.push("[下载] 调用失败：" + dnErr);
     } else if (!dn || dn.code !== 0) {
       L.push("[下载] 返回非 0：code=" + (dn && dn.code) + " msg=" + ((dn && (dn.msg || dn.message)) || "-"));
     } else {
       cloudRecs = (dn.data && dn.data.records) || [];
-      L.push("[下载] code=0，云端 " + cloudRecs.length + " 条记录，设置"
+      cloudTotalNum = (dn.data && typeof dn.data.total === "number") ? dn.data.total : cloudRecs.length;
+      L.push("[下载] code=0，云端共 " + cloudTotalNum + " 条，本次返回 " + cloudRecs.length
+        + " 条（增量，耗时 " + (dnMs / 1000).toFixed(2) + "s），设置"
         + (dn.data && dn.data.settings ? "存在" : "不存在"));
     }
     L.push("");
 
     // ④ 身份比对（决定性）
     let cloudTail = "";
-    for (let i = 0; i < cloudRecs.length; i++) {
+    if (dn && dn.data && dn.data.ownerOpenid) cloudTail = String(dn.data.ownerOpenid).slice(-6);
+    for (let i = 0; i < cloudRecs.length && !cloudTail; i++) {
       if (cloudRecs[i] && cloudRecs[i]._openid) { cloudTail = String(cloudRecs[i]._openid).slice(-6); break; }
     }
-    L.push("[身份比对] 云端记录 _openid 尾号 " + (cloudTail || "（云端记录里没有 _openid）")
-      + " / 本地 " + (localTail || "（空）"));
+    L.push("[身份比对] 云端写入身份尾号 " + (cloudTail || "（云端未返回）")
+      + " / 本地绑定 " + (localTail || "（空）"));
     L.push("");
     L.push("—— 结论 ——");
     if (!bindCode) {
       L.push("本地没有绑定码：云函数无法识别你的账号，上传会返回「未授权 -1」。请在设置里解绑后重新绑定。");
-    } else if (up.ok && (up.uploaded || 0) === 0 && cloudRecs.length === 0) {
+    } else if (up.ok && (up.uploaded || 0) === 0 && cloudTotalNum === 0) {
       L.push("本地没有待传记录，云端也是空的：说明这些记录早已标记为已同步，但云端确实没有。");
       L.push("请点「全量重传」再自检一次。");
-    } else if (cloudRecs.length > 0 && cloudTail && localTail && cloudTail !== localTail) {
-      L.push("★ 身份不一致：数据写进了账号 …" + cloudTail + "，小程序账号是 …" + localTail + "。");
+    } else if (cloudTotalNum > 0 && cloudTail && localTail && cloudTail !== localTail) {
+      L.push("★ 身份不一致：数据写进了账号 …" + cloudTail + "，而本机绑定的是 …" + localTail + "。");
       L.push("  所以 APK 自己读得到、小程序永远空白。需要在云函数里把身份解析改成");
       L.push("  「绑定码优先、微信上下文兜底」（只需重新部署云函数，不用改小程序代码）。");
-    } else if (cloudRecs.length > 0 && !cloudTail) {
-      L.push("云端记录缺少 _openid 字段：小程序端按 _openid 查询，永远查不到这些记录。");
-      L.push("  需要云函数在写入时显式带上 _openid（值为绑定码解析出的 openid）。");
-    } else if (cloudRecs.length > 0 && cloudTail === localTail) {
-      L.push("身份一致、云端已有 " + cloudRecs.length + " 条：APK 侧链路是通的。");
+    } else if (cloudTotalNum > 0 && !cloudTail) {
+      L.push("云端没返回写入身份，且记录里也找不到 _openid：小程序按 _openid 查会永远查不到。");
+      L.push("  需要云函数写入时显式带上 _openid（值为绑定码解析出的 openid）。");
+    } else if (cloudTotalNum > 0 && cloudTail === localTail) {
+      L.push("身份一致、云端已有 " + cloudTotalNum + " 条：APK 侧链路是通的。");
       L.push("  若小程序仍空白，问题在小程序读的那一端（未登录同一微信号 / 本地缓存未刷新）。");
     } else {
       L.push("上传未成功且云端为空：请按上面的错误码排查（-1 未授权 / -2 记录过多 / 超时）。");
@@ -6555,28 +6633,66 @@ function initAIChat() {
     showSelfCheckReport(L.join("\n"));
   }
 
-  // 启动自动同步（每30分钟）
-  function startAutoSync() {
+  /* v1.1.19：分级轮询——前台 3 分钟、后台 30 分钟。
+     原来固定 30 分钟一趟，打卡完要等最多半小时另一端才看得到。
+     用 setTimeout 链而不用 setInterval，间隔才能随前后台切换动态调整；
+     回到前台时立即补一次，并把节奏切回前台档。 */
+  const SYNC_FG_MS = 3 * 60 * 1000;
+  const SYNC_BG_MS = 30 * 60 * 1000;
+  function _syncTickMs() {
+    try {
+      return (typeof document !== "undefined" && document.visibilityState === "hidden")
+        ? SYNC_BG_MS : SYNC_FG_MS;
+    } catch (e) { return SYNC_FG_MS; }
+  }
+  function scheduleNextSync(delay) {
     if (cloudSyncState.syncInterval) {
-      clearInterval(cloudSyncState.syncInterval);
+      clearTimeout(cloudSyncState.syncInterval);
+      cloudSyncState.syncInterval = null;
     }
-    // 立即同步一次
+    const wait = (typeof delay === "number" && delay >= 0) ? delay : _syncTickMs();
+    cloudSyncState.syncInterval = setTimeout(async function() {
+      try { await bidirectionalSync({ silent: true }); } catch (e) { Logger.warn("auto sync error:", e); }
+      scheduleNextSync();
+    }, wait);
+  }
+
+  // 启动自动同步（前台 3 分钟 / 后台 30 分钟）
+  function startAutoSync() {
     bidirectionalSync();
-    // 每30分钟同步（后台轮询静默执行，失败不打扰）
-    cloudSyncState.syncInterval = setInterval(function() { bidirectionalSync({ silent: true }); }, 30 * 60 * 1000);
-    Logger.debug("Auto sync started, interval=30min");
+    scheduleNextSync();
+    Logger.debug("Auto sync started: fg=" + (SYNC_FG_MS / 60000) + "min bg=" + (SYNC_BG_MS / 60000) + "min");
   }
 
   // 停止自动同步
   function stopAutoSync() {
     if (cloudSyncState.syncInterval) {
-      clearInterval(cloudSyncState.syncInterval);
+      clearTimeout(cloudSyncState.syncInterval);
       cloudSyncState.syncInterval = null;
     }
   }
 
+  // 前后台切换：回前台补一次并提速，切后台降频
+  if (typeof document !== "undefined" && document.addEventListener) {
+    document.addEventListener("visibilitychange", function() {
+      if (!cloudSyncState.isLoggedIn) return;
+      if (document.visibilityState === "visible") {
+        // 刚同步过（15 秒内）就不重复跑，避免每次切页都打一遍云函数
+        if (!cloudSyncState.lastSync || Date.now() - cloudSyncState.lastSync > 15000) {
+          bidirectionalSync({ silent: true });
+        }
+        scheduleNextSync(SYNC_FG_MS);
+      } else {
+        scheduleNextSync(SYNC_BG_MS);
+      }
+    });
+  }
+
   // 初始化云同步状态
   function initCloudSync() {
+    /* v1.1.19：先把 CloudBase 的匿名会话预热起来（后台静默），
+       这样用户第一次点同步时不用再等匿名登录 + 云函数冷启动那 1~3 秒。 */
+    try { _ensureCloudbase().catch(function() {}); } catch (e) {}
     // 如果有openid，尝试恢复登录状态
     if (cloudSyncState.openid) {
       cloudSyncState.isLoggedIn = true;
@@ -6619,6 +6735,8 @@ function initAIChat() {
           cloudSyncState.openid = "";
           localStorage.removeItem("cloud_openid");
           localStorage.removeItem("bound_bind_code"); // v107修复：解绑时一并清除绑定码
+          cloudSyncState.lastDownloadAt = 0;
+          localStorage.removeItem("cloud_last_download");
           stopAutoSync();
           renderCloudBindStatus();
           toast("已解除绑定", "ok");
@@ -6658,12 +6776,18 @@ function initAIChat() {
 
   // 每次打卡后触发同步
   function onRecordChange() {
-    // 如果已登录，立即触发记录同步（debounce 5秒）
+    /* v1.1.19：打卡后 3 秒内合并上传（原来 5 秒），
+       并且只管"上传"——不连带跑一遍全量下载，点完签到很快就进云端。 */
     if (cloudSyncState.isLoggedIn) {
       clearTimeout(window._syncDebounceTimer);
-      window._syncDebounceTimer = setTimeout(() => {
-        syncRecordsToCloud();
-      }, 5000);
+      window._syncDebounceTimer = setTimeout(async () => {
+        try {
+          const up = await syncRecordsToCloud();
+          if (up && up.ok && up.uploaded > 0) {
+            Logger.debug("打卡已上传 " + up.uploaded + " 条，耗时 " + up.ms + "ms");
+          }
+        } catch (e) { Logger.warn("onRecordChange upload error:", e); }
+      }, 3000);
     }
   }
 
