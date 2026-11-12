@@ -1328,6 +1328,20 @@ function changeDefaults(patch) {
   if (!saveDB()) return false;
   syncNativeSettings();
   renderAll();
+  /* v1.1.21：今天如果被"按天设置/班次编辑"单独覆盖过，默认值是盖不动今天的。
+     不提示的话，用户会觉得"设置保存了但计算没变"。 */
+  try {
+    const dk = dateKey(new Date());
+    const hasDayCfg = (DB.dayConfigMap && DB.dayConfigMap[dk]) ||
+      (DB.dailyStartTimeMap && DB.dailyStartTimeMap[dk] !== undefined) ||
+      (DB.dailyEndTimeMap && DB.dailyEndTimeMap[dk] !== undefined) ||
+      (DB.dailyBreakMap && DB.dailyBreakMap[dk] !== undefined);
+    if (hasDayCfg) {
+      const dcfg = dayConfigOf(dk);
+      const t2 = cfgTimesFor(dk, dcfg);
+      toast("注意：今天单独设过班次（" + t2.startStr + "–" + t2.endStr + "），默认值从明天起生效", "warn", 7000);
+    }
+  } catch (e) {}
   return true;
 }
 // 周几规则保存入口
@@ -1479,16 +1493,16 @@ function computeShifts(records, dayStart, dayEnd, breakMinutes, cfgOverride) {
   const targetMin = Math.max(0, Math.round(setMin - breakMin));
   // T5.3：休息日默认按"实际在场"计（跳过未配对补全），工时=实际在场−午休
   const effMode = cfg.off ? "actual" : cfg.mode;
+  const nowMs = Date.now();   // v1.1.21：提前定义，ctxFor 判"是否已过下班"要用
 
   /* v1.1.14：按记录自带的配置快照解析该班次的口径。
-     有快照 → 完全按快照算（设置改动影响不到已产生的记录）；
-     无快照（极老数据）→ 回落到当天配置。 */
-  function ctxOf(rec) {
-    const snap = (rec && rec.cfg && typeof rec.cfg === "object") ? rec.cfg : null;
-    if (!snap) {
-      return { t: t, brk: breakMin, mode: effMode,
-               rate: (cfg.rate != null ? cfg.rate : (DB.payRate || 0)), off: !!cfg.off, snap: null };
-    }
+     v1.1.21：拆成「实时口径」和「快照口径」两支，由 ctxFor 决定用哪支。 */
+  function liveCtx(snap) {
+    return { t: t, brk: breakMin, mode: effMode,
+             rate: (cfg.rate != null ? cfg.rate : (DB.payRate || 0)),
+             off: !!cfg.off, snap: snap || null, live: true };
+  }
+  function snapCtx(snap) {
     const tt = cfgTimesFor(dayKey, snap);
     return {
       t: tt,
@@ -1496,8 +1510,26 @@ function computeShifts(records, dayStart, dayEnd, breakMinutes, cfgOverride) {
       mode: snap.off ? "actual" : (snap.mode || "shift"),
       rate: (snap.rate != null ? snap.rate : (DB.payRate || 0)),
       off: !!snap.off,
-      snap: snap
+      snap: snap,
+      live: false
     };
+  }
+  function ctxOf(rec) {
+    const snap = (rec && rec.cfg && typeof rec.cfg === "object") ? rec.cfg : null;
+    return snap ? snapCtx(snap) : liveCtx(null);
+  }
+  /* v1.1.21：进行中的班次跟随最新设置。
+     需求原话：「当日的午休时间及数据只要已经完成了的，不能再跟着设置改」——
+     反过来，**还没完成**的班次就应该跟着设置走，否则改完设置看不到任何变化。
+     判定"完成"的两个条件（满足任一即锁定快照）：
+       ① 已经签退（有配对的下班记录）
+       ② 没签退但已经过了这班的下班时间（视为正常出勤但忘记打卡）
+     只有"没签退且还没到下班时间"的班次，才用当天实时设置重算。 */
+  function ctxFor(rIn, hasOut) {
+    const snapK = ctxOf(rIn);
+    if (hasOut) return snapK;
+    if (nowMs >= snapK.t.endMs) return snapK;
+    return liveCtx(snapK.snap);
   }
   // v107修复：过滤软删除记录；下班记录按序消费，避免多个上班配对同一个下班（双计工时）
   // v111fix10：下班记录窗口扩至次日6小时——跨午夜班次的下班打卡落在次日
@@ -1506,13 +1538,15 @@ function computeShifts(records, dayStart, dayEnd, breakMinutes, cfgOverride) {
   const outRs = records.filter(r => !r.deleted && r.time >= dayStart && r.time < dayEnd + 6 * 3600000 && r.type === "out").sort((a,
       b) => a.time - b.time);
   const shifts = [];
+  const kByIn = new Map();   // v1.1.21：记录每条班次实际采用的口径，供封顶与 ctx 汇总
   let outIdx = 0;
   inRs.forEach(rIn => {
     while (outIdx < outRs.length && outRs[outIdx].time <= rIn.time) outIdx++;
     const out = outRs[outIdx];
     if (out) {
       outIdx++; // 消费该下班记录：同一天第二个上班不会再配到它
-      const k = ctxOf(rIn);            // v1.1.14：用上班记录自带的配置快照
+      const k = ctxFor(rIn, true);     // 已签退 → 用记录自带的快照
+      kByIn.set(rIn.time, k);
       const rawMin = Math.max(0, (out.time - rIn.time) / 60000);
       // shift=方案A（按设置班次，早到/晚退不增减）；actual=按实际时长（加班如实体现）
       const minutes = k.mode === "actual"
@@ -1526,7 +1560,6 @@ function computeShifts(records, dayStart, dayEnd, breakMinutes, cfgOverride) {
   });
   // 未配对的上班记录：shift 模式用设置下班时间补全；actual 模式算到 min(现在, 设置下班)
   const pairedIn = new Set(shifts.map(s => s.in));
-  const nowMs = Date.now();
   inRs.forEach(rIn => {
     if (!pairedIn.has(rIn.time)) {
       /* v1.1.13：未签退的班次不再一刀切按整班计。
@@ -1534,7 +1567,8 @@ function computeShifts(records, dayStart, dayEnd, breakMinutes, cfgOverride) {
          还没到下班时间就已经拿到 11h30m 满额工时，看起来就是"工时算多了"。
          现在：还没到下班时间 → 只计「从上班到此刻」；已过下班时间 →
          才按整班结算（视为正常出勤但忘记签退）。 */
-      const k = ctxOf(rIn);                        // v1.1.14：用记录自带快照
+      const k = ctxFor(rIn, false);                // 未签退：未到下班 → 跟实时设置；已过下班 → 锁定快照
+      kByIn.set(rIn.time, k);
       const nowCap = Math.min(nowMs, dayEnd);
       const softEnd = Math.min(k.t.endMs, dayEnd, Math.max(nowCap, rIn.time));
       let minutes, rawMin;
@@ -1574,19 +1608,20 @@ function computeShifts(records, dayStart, dayEnd, breakMinutes, cfgOverride) {
      无记录 → 回落实时配置），所有展示/导出口径都读它，与工时、金额同源。 */
   let ctx;
   if (inRs.length) {
+    // v1.1.21：用每条班次「实际采用」的口径（进行中的已切到实时），不再重新读快照
+    const ks = sorted.map(s => kByIn.get(s.in)).filter(Boolean);
     let maxTarget = 0, maxBreak = 0;
-    inRs.forEach(rIn => {
-      const k = ctxOf(rIn);
+    ks.forEach(k => {
       maxTarget = Math.max(maxTarget, Math.max(0, Math.round(k.t.setMin - k.brk)));
       maxBreak = Math.max(maxBreak, k.brk);
     });
-    const k0 = ctxOf(inRs[0]);
+    const k0 = ks[0] || liveCtx(null);
     ctx = {
       breakMin: k0.brk, breakMax: maxBreak,
       off: !!k0.off, mode: k0.mode, rate: k0.rate,
       targetMin: maxTarget,
       startStr: k0.t.startStr, endStr: k0.t.endStr,
-      snap: k0.snap, source: "record"
+      snap: k0.snap, source: k0.live ? "live" : "record"
     };
   } else {
     ctx = {
@@ -2073,6 +2108,18 @@ function addRecord(type, pos, source) {
     source: source || (locMode === "sim" ? "sim" : "auto"),
     updatedAt: now
   };
+  /* v1.1.21：签退这一刻定稿。
+     进行中的班次是按"实时设置"算的（见 computeShifts 的 ctxFor），
+     签退之后就转入锁定，所以把所属上班记录的快照刷新为此刻生效的值——
+     否则会跳回签到时的旧值，看起来像"签退后工时又变了"。 */
+  if (recType === "out") {
+    const openIn = DB.records.filter(r => !r.deleted && r.type === "in" && r.dateKey === todayKey)
+      .sort((a, b) => b.time - a.time)[0];
+    if (openIn) {
+      openIn.cfg = recordCfgSnapshot(todayKey);
+      openIn.updatedAt = now;
+    }
+  }
   DB.records.push(rec);
   if (!saveDB()) {
     // 回滚：移除刚加入的记录
@@ -2092,7 +2139,7 @@ function resetDB() {
 }
 
 /* ===================== v3 功能实现（任务书第 4/5/7 批）===================== */
-var APP_VERSION = "1.1.20"; // v1.1.20：修「记录上传失败 · 错误码 -2 · Cannot create field 'breakMin' in element {cfg: null}」——云数据库 update 已有文档时会把嵌套对象拆成点路径（cfg.breakMin、cfg.start…）再写，云端旧文档的 cfg 是 null 时无法在 null 下建子字段，整批 write errors 一起失败（新增记录不受影响，只有"更新已有记录"这一路炸）。①APK 侧：没有 cfg 快照的记录不再发 cfg 字段（原来发 cfg:null），彻底绕开点路径展开；②云函数侧：cfg 改走 _.set() 整体替换；③失败提示只截前 160 字，不再糊满整屏；v1.1.19：提同步速度——①记录上传改 3 路并发（原来批次串行，10 批就是 10 倍排队）；②轮询分级：前台 3 分钟、后台 30 分钟（原来固定 30 分钟），切回前台立即补一次；③下载游标独立成 lastDownloadAt 并持久化（原来与上传共用 lastSync，上传会把游标推到"现在"，漏掉对端刚改的记录）；④空转跳过：没有新东西要传且两分钟内刚下载过，后台轮询不再拉一遍全量；⑤启动预热匿名会话与云函数；⑥打卡后 3 秒合并上传；⑦同步/自检提示补上批次数与耗时；配套云函数补丁：下载改真增量（用起 lastSyncTime，留 10 分钟回看窗口）、上传按 id 批量查存在性（30 条从 30 次读降到 2 次）、回传 total 与 ownerOpenid；v1.1.18：专治「APK 说同步完成、小程序收不到」——①记录上传分批（每批 30 条，逐批推进游标并落盘）：原实现把所有待传记录连同每条记录的 cfg 快照塞进一次 callFunction，历史一多就超请求体上限；云函数里每条记录还要 1~2 次数据库查询，几百条直接超时，整批失败且游标不推进，下次又整批重来，永远传不完；②上传失败时明确报出「第几批、该批多少条、已成功多少条」，不再是一句含糊的失败；③新增身份一致性校验：下载回来的云端记录带着 _openid，与本地绑定到的 openid 尾号比对，不一致就直接点明「数据写进了另一个身份，小程序看不到」；④新增「自检」按钮：一次跑完绑定态/checkBind/上传/下载/身份比对，输出可一键复制的报告，不用再靠猜；v1.1.17：修复「午休时长仍会倒改已完成记录」——v1.1.16 已让计算走记录快照，但展示与导出仍在读实时设置，于是改设置里的午休时长后，首页「午休扣除 X」、记录列表、月度统计表的「午休 Xmin」/目标工时/完成度、CSV「午休(分钟)」列、按日期编辑弹窗里的「上班/下班/午休」全都跟着变，看起来就是午休还在回写历史。现在 computeShifts 统一汇总出「当天账本口径」shifts.ctx（有记录时来自该记录固化的 cfg 快照，无记录才回落实时配置），上述所有展示与导出口径都改为读它，与工时、金额同源；refreshAfterEdit 中那份会读实时配置的重复概览逻辑改为直接复用 renderOverview；CSV 的时薪/收入也改按班次快照，休息日写 0 并注明；v1.1.16：修复两处——①当日已完成记录仍被设置倒改：computeShifts 的「每日封顶额度/封顶口径」原先取实时配置（targetMin/effMode），改班次或每日工时后已完成的班次会被重新削顶（07:00-19:00 已记 690 分钟，改成 09:00-18:00 后变 510）；现改为按当天每条上班记录自带快照的班次目标取最大值来封顶、口径按首条快照，快照新增 hours 固化「每日工时」，旧记录升级时补一次；②云同步「假成功」：syncSettings/syncRecords/syncFromCloud 改为返回结构化结果（ok/uploaded/code/msg），任何一步云函数返回非 0 都明确提示是哪一步、错误码与消息，不再无条件弹「数据同步完成」；上传载荷补带 cfg 快照与 adminAdd，小程序端不会再用它那边的实时设置重算工时；重新绑定成功后重置全部记录的 syncedAt 以触发全量重传（此前换绑后本地记录都标着「已同步」，一条都不传 → 小程序永远空白），并新增「全量重传」按钮；上传成功但云端读回 0 条时提示核对是否同一个微信号；v1.1.15：新增「总数据管理」（设置 → 数据管理）——①全屏管理页：数据总览（有效/墓碑条数、覆盖天数、累计工时与金额）+ 日期区间/类型/状态筛选 + 逐条勾选（不勾则作用于筛选命中的全部）；②批量修改：时间平移（±分钟）、统一时刻、整体改期，跨日改动自动按目标日期重固化 cfg 快照；③软删除与恢复，只动选中的记录，不连带其它日期；④批量补录：按日期区间逐日补一对上下班，可跳过休息日与已有记录，来源标记 admin 且不伪造工作地点坐标；⑤清理墓碑、清空全部（软删除，设置项不受影响）；⑥每次写操作前把 records 整份快照存到独立 key（不进 DB/备份/云同步），可整体撤销一步；v1.1.14：设置不再影响历史——①每条记录产生时固化 cfg 快照（班次/午休/时薪/计薪方式），计算工时与金额时优先用记录自带快照，改设置只影响之后的新记录；②概览/记录列表/统计表的金额改为按各班次自己的时薪累加；③迟到判定改用该次签到时的班次快照；④旧记录自动补快照（backfillRecordCfg），从此不再漂移；⑤单日班次编辑器仍会同步该日记录（显式按日修正）；v1.1.13：修复工时/休息日/周期班次——①周期班次与单日班次保存时休息日不再被丢弃（勾「休」可不填时间）②00:00 被 falsy 误判为非法的所有校验改为 == null 判断（零点班可用）③休息日不再产生金额（概览/记录列表/月度统计全部不计薪，且不进月收入合计）④未签退的班次不再预付整班工时（未到下班时间只计已出勤时长）；v1.1.12：未到工作区禁止任何签到记录操作——新增 checkRecordGate() 统一闸门（工作地已设置+定位有效+定位≤60秒新鲜+在围栏内），接入 addRecord/doCheck/补录三处；签退不再"随处可签"；补录改存真实坐标；v1.1.11：云函数调用超时保护（未登录云开发/云函数不可达时搜索不再永久挂起）；v1.1.10：修复搜索无响应——①云函数返回体解包错位导致云路径从不生效 ②识别百度"天配额超限"并立即提示 ③搜索加12秒超时+按钮"搜索中"状态 ④同名匹配防止采纳别家公司坐标 ⑤搜索结果缓存降低配额消耗 ⑥输入联想防抖300→500ms、门槛2→3字；v1.1.9：修复工作地定位——①拒绝行政区级(城市/区县)坐标入库 ②「设为当前位置」主动取新鲜GPS ③原生地图红标/围栏跟随工作地变更 ④红标可拖拽回写坐标 ⑤修正原生地图WGS84/BD09坐标偏移
+var APP_VERSION = "1.1.21"; // v1.1.21：修「改完设置，当天的计算结果不变」——把「已完成才锁定」落成可执行的规则：①已签退，或未签退但已过下班时间 → 视为此班已完成，继续用记录快照（历史不倒改）；②未签退且还没到下班时间 → 视为进行中，工时/目标/午休/时薪/金额全部改用当天最新设置，改完立刻能看到变化；③签退的那一刻把所属上班记录的快照刷新为"此刻"的值，完成即定稿，不会出现签退后又跳回旧数；④保存默认值/午休/时薪时，若今天被"按天设置/班次编辑"单独覆盖过，明确提示「默认值从明天起生效」，不再让人以为保存没生效；v1.1.20：修「记录上传失败 · 错误码 -2 · Cannot create field 'breakMin' in element {cfg: null}」——云数据库 update 已有文档时会把嵌套对象拆成点路径（cfg.breakMin、cfg.start…）再写，云端旧文档的 cfg 是 null 时无法在 null 下建子字段，整批 write errors 一起失败（新增记录不受影响，只有"更新已有记录"这一路炸）。①APK 侧：没有 cfg 快照的记录不再发 cfg 字段（原来发 cfg:null），彻底绕开点路径展开；②云函数侧：cfg 改走 _.set() 整体替换；③失败提示只截前 160 字，不再糊满整屏；v1.1.19：提同步速度——①记录上传改 3 路并发（原来批次串行，10 批就是 10 倍排队）；②轮询分级：前台 3 分钟、后台 30 分钟（原来固定 30 分钟），切回前台立即补一次；③下载游标独立成 lastDownloadAt 并持久化（原来与上传共用 lastSync，上传会把游标推到"现在"，漏掉对端刚改的记录）；④空转跳过：没有新东西要传且两分钟内刚下载过，后台轮询不再拉一遍全量；⑤启动预热匿名会话与云函数；⑥打卡后 3 秒合并上传；⑦同步/自检提示补上批次数与耗时；配套云函数补丁：下载改真增量（用起 lastSyncTime，留 10 分钟回看窗口）、上传按 id 批量查存在性（30 条从 30 次读降到 2 次）、回传 total 与 ownerOpenid；v1.1.18：专治「APK 说同步完成、小程序收不到」——①记录上传分批（每批 30 条，逐批推进游标并落盘）：原实现把所有待传记录连同每条记录的 cfg 快照塞进一次 callFunction，历史一多就超请求体上限；云函数里每条记录还要 1~2 次数据库查询，几百条直接超时，整批失败且游标不推进，下次又整批重来，永远传不完；②上传失败时明确报出「第几批、该批多少条、已成功多少条」，不再是一句含糊的失败；③新增身份一致性校验：下载回来的云端记录带着 _openid，与本地绑定到的 openid 尾号比对，不一致就直接点明「数据写进了另一个身份，小程序看不到」；④新增「自检」按钮：一次跑完绑定态/checkBind/上传/下载/身份比对，输出可一键复制的报告，不用再靠猜；v1.1.17：修复「午休时长仍会倒改已完成记录」——v1.1.16 已让计算走记录快照，但展示与导出仍在读实时设置，于是改设置里的午休时长后，首页「午休扣除 X」、记录列表、月度统计表的「午休 Xmin」/目标工时/完成度、CSV「午休(分钟)」列、按日期编辑弹窗里的「上班/下班/午休」全都跟着变，看起来就是午休还在回写历史。现在 computeShifts 统一汇总出「当天账本口径」shifts.ctx（有记录时来自该记录固化的 cfg 快照，无记录才回落实时配置），上述所有展示与导出口径都改为读它，与工时、金额同源；refreshAfterEdit 中那份会读实时配置的重复概览逻辑改为直接复用 renderOverview；CSV 的时薪/收入也改按班次快照，休息日写 0 并注明；v1.1.16：修复两处——①当日已完成记录仍被设置倒改：computeShifts 的「每日封顶额度/封顶口径」原先取实时配置（targetMin/effMode），改班次或每日工时后已完成的班次会被重新削顶（07:00-19:00 已记 690 分钟，改成 09:00-18:00 后变 510）；现改为按当天每条上班记录自带快照的班次目标取最大值来封顶、口径按首条快照，快照新增 hours 固化「每日工时」，旧记录升级时补一次；②云同步「假成功」：syncSettings/syncRecords/syncFromCloud 改为返回结构化结果（ok/uploaded/code/msg），任何一步云函数返回非 0 都明确提示是哪一步、错误码与消息，不再无条件弹「数据同步完成」；上传载荷补带 cfg 快照与 adminAdd，小程序端不会再用它那边的实时设置重算工时；重新绑定成功后重置全部记录的 syncedAt 以触发全量重传（此前换绑后本地记录都标着「已同步」，一条都不传 → 小程序永远空白），并新增「全量重传」按钮；上传成功但云端读回 0 条时提示核对是否同一个微信号；v1.1.15：新增「总数据管理」（设置 → 数据管理）——①全屏管理页：数据总览（有效/墓碑条数、覆盖天数、累计工时与金额）+ 日期区间/类型/状态筛选 + 逐条勾选（不勾则作用于筛选命中的全部）；②批量修改：时间平移（±分钟）、统一时刻、整体改期，跨日改动自动按目标日期重固化 cfg 快照；③软删除与恢复，只动选中的记录，不连带其它日期；④批量补录：按日期区间逐日补一对上下班，可跳过休息日与已有记录，来源标记 admin 且不伪造工作地点坐标；⑤清理墓碑、清空全部（软删除，设置项不受影响）；⑥每次写操作前把 records 整份快照存到独立 key（不进 DB/备份/云同步），可整体撤销一步；v1.1.14：设置不再影响历史——①每条记录产生时固化 cfg 快照（班次/午休/时薪/计薪方式），计算工时与金额时优先用记录自带快照，改设置只影响之后的新记录；②概览/记录列表/统计表的金额改为按各班次自己的时薪累加；③迟到判定改用该次签到时的班次快照；④旧记录自动补快照（backfillRecordCfg），从此不再漂移；⑤单日班次编辑器仍会同步该日记录（显式按日修正）；v1.1.13：修复工时/休息日/周期班次——①周期班次与单日班次保存时休息日不再被丢弃（勾「休」可不填时间）②00:00 被 falsy 误判为非法的所有校验改为 == null 判断（零点班可用）③休息日不再产生金额（概览/记录列表/月度统计全部不计薪，且不进月收入合计）④未签退的班次不再预付整班工时（未到下班时间只计已出勤时长）；v1.1.12：未到工作区禁止任何签到记录操作——新增 checkRecordGate() 统一闸门（工作地已设置+定位有效+定位≤60秒新鲜+在围栏内），接入 addRecord/doCheck/补录三处；签退不再"随处可签"；补录改存真实坐标；v1.1.11：云函数调用超时保护（未登录云开发/云函数不可达时搜索不再永久挂起）；v1.1.10：修复搜索无响应——①云函数返回体解包错位导致云路径从不生效 ②识别百度"天配额超限"并立即提示 ③搜索加12秒超时+按钮"搜索中"状态 ④同名匹配防止采纳别家公司坐标 ⑤搜索结果缓存降低配额消耗 ⑥输入联想防抖300→500ms、门槛2→3字；v1.1.9：修复工作地定位——①拒绝行政区级(城市/区县)坐标入库 ②「设为当前位置」主动取新鲜GPS ③原生地图红标/围栏跟随工作地变更 ④红标可拖拽回写坐标 ⑤修正原生地图WGS84/BD09坐标偏移
 const WEEKDAY_NAMES = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
 
 // ---- 通用自绘弹层：确认 / 输入（替代系统 confirm/prompt）----
