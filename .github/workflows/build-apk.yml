@@ -66,7 +66,6 @@ jobs:
           mkdir -p www
           cp index.html manifest.json sw.js www/
           cp icon-192.png icon-512.png www/
-          cp splash-worker.png www/ 2>/dev/null || true
           cp cloudbase-sdk.min.js www/
           if [ -d app-icon ]; then cp -r app-icon www/; fi
 
