@@ -10,6 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      administration: write   # 用于同步仓库简介里的版本号
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -1860,3 +1861,17 @@ jobs:
           generate_release_notes: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # v1.1.58：仓库简介自动跟随 APP_VERSION（失败不影响出包）
+      - name: Sync repo description with APP_VERSION
+        if: github.ref == 'refs/heads/main'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VER=$(grep -o 'var APP_VERSION = "[0-9][0-9.]*"' index.html | head -1 | sed 's/.*"//; s/"//')
+          VC=$(grep -o 'versionCode [0-9]*' android/app/build.gradle | head -1 | grep -o '[0-9]*' || echo "")
+          if [ -z "$VER" ]; then echo "未读到 APP_VERSION，跳过"; exit 0; fi
+          DESC="WorkTime · 个人工时打卡（Android APK + 微信小程序）｜APK v${VER}${VC:+ / versionCode $VC}"
+          echo "写入简介：$DESC"
+          gh api -X PATCH "repos/${{ github.repository }}" -f description="$DESC" --jq '.description' || echo "简介更新失败（可能缺少 administration 权限），不影响出包"
