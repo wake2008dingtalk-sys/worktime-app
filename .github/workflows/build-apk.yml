@@ -1861,21 +1861,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # v1.1.58：仓库简介自动跟随 APP_VERSION（失败不影响出包）
-      - name: Sync repo description with APP_VERSION
-        if: github.ref == 'refs/heads/main'
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ secrets.REPO_PAT || secrets.GITHUB_TOKEN }}
-        run: |
-          echo "cwd=$(pwd)"; ls -l index.html 2>&1 | head -2
-          VER=$(grep -oE 'var APP_VERSION = "[^"]+"' index.html | head -1 | sed 's/.*"\(.*\)"/\1/')
-          VC=$(grep -o 'versionCode [0-9]*' android/app/build.gradle | head -1 | grep -o '[0-9]*' || echo "")
-          if [ -z "$VER" ]; then echo "未读到 APP_VERSION，跳过"; exit 0; fi
-          DESC="WorkTime · 个人工时打卡（Android APK + 微信小程序）｜APK v${VER}${VC:+ / versionCode $VC}"
-          echo "写入简介：$DESC"
-          gh api -X PATCH "repos/${{ github.repository }}" -f description="$DESC" --jq '.description' || echo "简介更新失败（可能缺少 administration 权限），不影响出包"
-
       # v1.1.59：README 顶部版本块自动更新（不依赖 PAT，用 GITHUB_TOKEN 推 commit）
       - name: Sync README version block
         if: github.ref == 'refs/heads/main'
