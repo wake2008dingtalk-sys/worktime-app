@@ -10,7 +10,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      administration: write   # 用于同步仓库简介里的版本号
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -1867,7 +1866,7 @@ jobs:
         if: github.ref == 'refs/heads/main'
         continue-on-error: true
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.REPO_PAT || secrets.GITHUB_TOKEN }}
         run: |
           VER=$(grep -o 'var APP_VERSION = "[0-9][0-9.]*"' index.html | head -1 | sed 's/.*"//; s/"//')
           VC=$(grep -o 'versionCode [0-9]*' android/app/build.gradle | head -1 | grep -o '[0-9]*' || echo "")
