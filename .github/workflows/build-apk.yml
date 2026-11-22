@@ -1868,7 +1868,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.REPO_PAT || secrets.GITHUB_TOKEN }}
         run: |
-          VER=$(grep -o 'var APP_VERSION = "[0-9][0-9.]*"' index.html | head -1 | sed 's/.*"//; s/"//')
+          echo "cwd=$(pwd)"; ls -l index.html 2>&1 | head -2
+          VER=$(grep -oE 'var APP_VERSION = "[^"]+"' index.html | head -1 | sed 's/.*"\(.*\)"/\1/')
           VC=$(grep -o 'versionCode [0-9]*' android/app/build.gradle | head -1 | grep -o '[0-9]*' || echo "")
           if [ -z "$VER" ]; then echo "未读到 APP_VERSION，跳过"; exit 0; fi
           DESC="WorkTime · 个人工时打卡（Android APK + 微信小程序）｜APK v${VER}${VC:+ / versionCode $VC}"
