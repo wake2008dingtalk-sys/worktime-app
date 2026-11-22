@@ -1875,3 +1875,32 @@ jobs:
           DESC="WorkTime · 个人工时打卡（Android APK + 微信小程序）｜APK v${VER}${VC:+ / versionCode $VC}"
           echo "写入简介：$DESC"
           gh api -X PATCH "repos/${{ github.repository }}" -f description="$DESC" --jq '.description' || echo "简介更新失败（可能缺少 administration 权限），不影响出包"
+
+      # v1.1.59：README 顶部版本块自动更新（不依赖 PAT，用 GITHUB_TOKEN 推 commit）
+      - name: Sync README version block
+        if: github.ref == 'refs/heads/main'
+        continue-on-error: true
+        run: |
+          VER=$(grep -oE 'var APP_VERSION = "[^"]+"' index.html | head -1 | sed 's/.*"\(.*\)"/\1/')
+          VC=$(grep -o 'versionCode [0-9]*' android/app/build.gradle | head -1 | grep -o '[0-9]*' || echo "")
+          [ -z "$VER" ] && echo "未读到版本，跳过" && exit 0
+          python3 - "$VER" "$VC" <<'PYEOF'
+          import re, sys, datetime
+          ver, vc = sys.argv[1], sys.argv[2]
+          txt = open('README.md', encoding='utf-8').read()
+          stamp = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8))).strftime('%Y-%m-%d')
+          line = f"> **当前版本 v{ver}**（versionCode {vc}）· 构建于 {stamp}"
+          new = re.sub(r'<!-- AUTO:VERSION -->.*?<!-- /AUTO:VERSION -->',
+                       '<!-- AUTO:VERSION -->\n' + line + '\n<!-- /AUTO:VERSION -->', txt, flags=re.S)
+          if new != txt:
+              open('README.md', 'w', encoding='utf-8').write(new)
+              print('README 已更新:', line)
+          else:
+              print('README 无需变更')
+          PYEOF
+          if git diff --quiet README.md; then echo "无变更，跳过提交"; exit 0; fi
+          git config user.name "worktime-bot"
+          git config user.email "bot@local"
+          git add README.md
+          git commit -m "chore: sync README version to v${VER} [skip ci]"
+          git push

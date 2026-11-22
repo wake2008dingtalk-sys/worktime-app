@@ -1,5 +1,10 @@
 # WorkTime · 个人工时打卡
 
+<!-- AUTO:VERSION -->
+> **当前版本 v1.1.58**（versionCode 232）· 构建于 2026-11-22
+<!-- /AUTO:VERSION -->
+
+
 定位签到 + 工时统计。**Android APK**（Capacitor 套壳单文件页）与 **微信小程序**（云开发）共用一套数据与算法。
 
 网页版：https://wake2008dingtalk-sys.github.io/worktime-app/
