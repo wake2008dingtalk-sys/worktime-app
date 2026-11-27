@@ -202,7 +202,8 @@ jobs:
                   import android.location.LocationListener;
                   import android.location.LocationManager;
                   import android.os.Bundle;
-                  import android.os.Handler;
+                  import android.os.Build;
+          import android.os.Handler;
                   import android.os.Looper;
                   import android.util.Log;
                   import androidx.core.content.ContextCompat;
@@ -1873,6 +1874,38 @@ jobs:
               }
 
               @PluginMethod
+              public void canInstall(PluginCall call) {
+                  boolean ok = true;
+                  try {
+                      if (Build.VERSION.SDK_INT >= 26) {
+                          ok = getContext().getPackageManager().canRequestPackageInstalls();
+                      }
+                  } catch (Exception e) { ok = true; }
+                  JSObject r = new JSObject();
+                  r.put("allowed", ok);
+                  call.resolve(r);
+              }
+
+              @PluginMethod
+              public void openInstallSettings(PluginCall call) {
+                  openInstallSettings();
+                  JSObject r = new JSObject();
+                  r.put("ok", true);
+                  call.resolve(r);
+              }
+
+              private void openInstallSettings() {
+                  try {
+                      if (Build.VERSION.SDK_INT >= 26) {
+                          Intent it = new Intent(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                                  Uri.parse("package:" + getContext().getPackageName()));
+                          it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                          getContext().startActivity(it);
+                      }
+                  } catch (Exception ignored) {}
+              }
+
+              @PluginMethod
               public void install(PluginCall call) {
                   installApk(apkFile(), 0);
                   JSObject r = new JSObject();
@@ -1888,6 +1921,12 @@ jobs:
                           try {
                               if (!f.exists() || f.length() == 0) {
                                   if (attempt < 8) retry(f, attempt);
+                                  return;
+                              }
+                              if (Build.VERSION.SDK_INT >= 26 &&
+                                      !getContext().getPackageManager().canRequestPackageInstalls()) {
+                                  ST = "need_permission";
+                                  openInstallSettings();
                                   return;
                               }
                               Uri uri = FileProvider.getUriForFile(getContext(),
