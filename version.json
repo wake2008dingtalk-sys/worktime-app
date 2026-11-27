@@ -1,8 +1,8 @@
 {
-  "versionName": "1.1.95",
-  "versionCode": 269,
-  "apk": "https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v269/worktime-release.apk",
-  "apkMirror": "https://ghfast.top/https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v269/worktime-release.apk",
-  "notes": "v1.1.95 联网检测改主动探测（不依赖onLine事件）",
-  "publishedAt": "2026-11-27T15:41:33Z"
+  "versionName": "1.1.96",
+  "versionCode": 270,
+  "apk": "https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v270/worktime-release.apk",
+  "apkMirror": "https://ghfast.top/https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v270/worktime-release.apk",
+  "notes": "v1.1.96 分段续传重试+安装失败可视化",
+  "publishedAt": "2026-11-27T15:54:22Z"
 }
