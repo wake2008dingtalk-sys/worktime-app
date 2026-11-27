@@ -1765,6 +1765,7 @@ jobs:
 
               private boolean fetchParallel(String url, final File target, long total) {
                   final int parts = 6;
+                  final String src = url;
                   final long chunk = total / parts + 1;
                   try {
                       if (target.exists()) target.delete();
@@ -1780,39 +1781,45 @@ jobs:
                           if (start > end) continue;
                           ts[i] = new Thread(new Runnable() {
                               @Override public void run() {
-                                  RandomAccessFile f = null;
-                                  HttpURLConnection c = null;
-                                  try {
-                                      f = new RandomAccessFile(target, "rw");
-                                      f.seek(start);
-                                      c = (HttpURLConnection) new URL(url).openConnection();
-                                      c.setConnectTimeout(8000);
-                                      c.setReadTimeout(20000);
-                                      c.setRequestProperty("Range", "bytes=" + start + "-" + end);
-                                      c.setRequestProperty("User-Agent", "WorkTime-Updater");
-                                      if (c.getResponseCode() != 206) { failed[0] = true; return; }
-                                      String cr = c.getHeaderField("Content-Range");
-                                      if (cr == null || !cr.startsWith("bytes " + start + "-")) {
-                                          failed[0] = true;
-                                          return;
+                                  long written = 0;
+                                  long want = end - start + 1;
+                                  /* 每段最多重试 4 次，并从中断处续传，
+                                     避免最后一段卡住导致整体停在 99% */
+                                  for (int attempt = 0; attempt < 4 && written < want; attempt++) {
+                                      RandomAccessFile f = null;
+                                      HttpURLConnection c = null;
+                                      try {
+                                          long from = start + written;
+                                          f = new RandomAccessFile(target, "rw");
+                                          f.seek(from);
+                                          c = (HttpURLConnection) new URL(src).openConnection();
+                                          c.setConnectTimeout(8000);
+                                          c.setReadTimeout(30000);
+                                          c.setRequestProperty("Range", "bytes=" + from + "-" + end);
+                                          c.setRequestProperty("User-Agent", "WorkTime-Updater");
+                                          if (c.getResponseCode() != 206) { continue; }
+                                          String cr = c.getHeaderField("Content-Range");
+                                          if (cr == null || !cr.startsWith("bytes " + from + "-")) { continue; }
+                                          InputStream in = c.getInputStream();
+                                          byte[] buf = new byte[64 * 1024];
+                                          int n;
+                                          long remaining = want - written;
+                                          while (remaining > 0 &&
+                                                 (n = in.read(buf, 0, (int) Math.min(buf.length, remaining))) > 0) {
+                                              f.write(buf, 0, n);
+                                              DL.addAndGet(n);
+                                              written += n;
+                                              remaining -= n;
+                                          }
+                                          in.close();
+                                      } catch (Exception e) {
+                                          /* 断点续传：下一次从 written 处继续 */
+                                      } finally {
+                                          try { if (f != null) f.close(); } catch (Exception ignored) {}
+                                          try { if (c != null) c.disconnect(); } catch (Exception ignored) {}
                                       }
-                                      InputStream in = c.getInputStream();
-                                      byte[] buf = new byte[64 * 1024];
-                                      long remaining = end - start + 1;
-                                      int n;
-                                      while (remaining > 0 &&
-                                             (n = in.read(buf, 0, (int) Math.min(buf.length, remaining))) > 0) {
-                                          f.write(buf, 0, n);
-                                          DL.addAndGet(n);
-                                          remaining -= n;
-                                      }
-                                      in.close();
-                                  } catch (Exception e) {
-                                      failed[0] = true;
-                                  } finally {
-                                      try { if (f != null) f.close(); } catch (Exception ignored) {}
-                                      try { if (c != null) c.disconnect(); } catch (Exception ignored) {}
                                   }
+                                  if (written < want) failed[0] = true;
                               }
                           });
                           ts[i].start();
@@ -1861,6 +1868,7 @@ jobs:
                   r.put("downloaded", DL.get());
                   r.put("total", TOT);
                   r.put("status", ST);
+                  r.put("error", ERR);
                   call.resolve(r);
               }
 
@@ -1871,6 +1879,8 @@ jobs:
                   r.put("ok", true);
                   call.resolve(r);
               }
+
+              private static volatile String ERR = "";
 
               private void installApk(final File f, final int attempt) {
                   getActivity().runOnUiThread(new Runnable() {
@@ -1889,7 +1899,9 @@ jobs:
                                       | Intent.FLAG_ACTIVITY_CLEAR_TOP);
                               getContext().startActivity(it);
                           } catch (Exception e) {
+                              ERR = String.valueOf(e.getMessage());
                               if (attempt < 8) retry(f, attempt);
+                              else ST = "install_failed";
                           }
                       }
                   });
