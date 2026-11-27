@@ -2122,8 +2122,8 @@ jobs:
           git remote add origin "https://x-access-token:${TOKEN}@github.com/${{ github.repository }}.git"
           git fetch -q --depth=1 origin gh-pages
           git checkout -q -b gh-pages FETCH_HEAD
-          printf '{\n  "versionName": "%s",\n  "versionCode": %s,\n  "apk": "https://github.com/%s/releases/download/v%s/worktime-release.apk",\n  "notes": "%s",\n  "publishedAt": "%s"\n}\n' \
-            "$VER" "${VC:-0}" "${{ github.repository }}" "${VC}" "$NOTES" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > version.json
+          printf '{\n  "versionName": "%s",\n  "versionCode": %s,\n  "apk": "https://github.com/%s/releases/download/v%s/worktime-release.apk",\n  "apkMirror": "https://ghfast.top/https://github.com/%s/releases/download/v%s/worktime-release.apk",\n  "notes": "%s",\n  "publishedAt": "%s"\n}\n' \
+            "$VER" "${VC:-0}" "${{ github.repository }}" "${VC}" "${{ github.repository }}" "${VC}" "$NOTES" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > version.json
           cat version.json
           git add version.json
           git -c user.name="worktime-bot" -c user.email="bot@local" commit -q -m "chore: version.json v${VER} [skip ci]" || echo "无变化"
