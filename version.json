@@ -1,7 +1,7 @@
 {
-  "versionName": "1.1.77",
-  "versionCode": 251,
-  "apk": "https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v251/worktime-release.apk",
-  "notes": "v1.1.77 进度条显示已下载/总大小（验证应用内更新）",
-  "publishedAt": "2026-11-27T12:12:32Z"
+  "versionName": "1.1.78",
+  "versionCode": 252,
+  "apk": "https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v252/worktime-release.apk",
+  "notes": "v1.1.78 稍后提醒：设置页显示有新版本",
+  "publishedAt": "2026-11-27T12:23:22Z"
 }
