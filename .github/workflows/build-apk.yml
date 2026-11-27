@@ -1688,11 +1688,22 @@ jobs:
 
                   DL.set(0); TOT = 0; ST = "running";
                   final File target = apkFile();
+                  final String expectSha = call.getString("sha256");
                   worker = new Thread(new Runnable() {
                       @Override public void run() {
                           for (String u : urls) {
                               try {
                                   if (fetch(u, target)) {
+                                      if (expectSha != null && expectSha.length() == 64) {
+                                          String actual = sha256Of(target);
+                                          if (!expectSha.equalsIgnoreCase(actual)) {
+                                              ERR = "sha256 不匹配（期望 " + expectSha.substring(0, 8) +
+                                                    "，实际 " + (actual == null ? "?" : actual.substring(0, Math.min(8, actual.length()))) + "）";
+                                              ST = "hash_failed";
+                                              try { target.delete(); } catch (Exception ignored) {}
+                                              return;
+                                          }
+                                      }
                                       ST = "ready";
                                       new Handler(Looper.getMainLooper()).post(new Runnable() {
                                           @Override public void run() { installApk(target, 0); }
@@ -1715,13 +1726,32 @@ jobs:
                   HttpURLConnection probe = null;
                   try {
                       probe = (HttpURLConnection) new URL(url).openConnection();
-                      probe.setConnectTimeout(8000);
-                      probe.setReadTimeout(15000);
-                      probe.setRequestProperty("Range", "bytes=0-0");
+                      probe.setConnectTimeout(3000);
+                      probe.setReadTimeout(8000);
+                      probe.setRequestProperty("Range", "bytes=0-3");
                       probe.setRequestProperty("User-Agent", "WorkTime-Updater");
                       int code = probe.getResponseCode();
                       long total = -1;
                       boolean rangeOk = (code == 206);
+                      /* 头部校验：真 APK 是 ZIP，头 4 字节为 50 4B 03 04；
+                         镜像返回 HTML 错误页时在这里就能发现，不必下完 17MB */
+                      try {
+                          InputStream hs = probe.getInputStream();
+                          byte[] hb = new byte[4];
+                          int got = 0;
+                          while (got < 4) {
+                              int r = hs.read(hb, got, 4 - got);
+                              if (r <= 0) break;
+                              got += r;
+                          }
+                          hs.close();
+                          if (got < 4 || hb[0] != 0x50 || hb[1] != 0x4B || hb[2] != 0x03 || hb[3] != 0x04) {
+                              probe.disconnect();
+                              return false;
+                          }
+                      } catch (Exception he) {
+                          return false;
+                      }
                       String cr = probe.getHeaderField("Content-Range");
                       if (cr != null && cr.contains("/")) {
                           try { total = Long.parseLong(cr.substring(cr.indexOf('/') + 1).trim()); } catch (Exception ignored) {}
@@ -1879,6 +1909,25 @@ jobs:
                   r.put("status", ST);
                   r.put("error", ERR);
                   call.resolve(r);
+              }
+
+              private static String sha256Of(File f) {
+                  java.io.FileInputStream in = null;
+                  try {
+                      java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-256");
+                      in = new java.io.FileInputStream(f);
+                      byte[] buf = new byte[64 * 1024];
+                      int n;
+                      while ((n = in.read(buf)) > 0) md.update(buf, 0, n);
+                      byte[] d = md.digest();
+                      StringBuilder sb = new StringBuilder();
+                      for (byte b : d) sb.append(String.format("%02x", b));
+                      return sb.toString();
+                  } catch (Exception e) {
+                      return null;
+                  } finally {
+                      try { if (in != null) in.close(); } catch (Exception ignored) {}
+                  }
               }
 
               @PluginMethod
@@ -2312,14 +2361,15 @@ jobs:
           VC=$(grep -o 'versionCode [0-9]*' android/app/build.gradle | head -1 | grep -o '[0-9]*' || echo "")
           [ -z "$VER" ] && echo "未读到版本，跳过" && exit 0
           NOTES=$(git log -1 --pretty=%s | tr -d '"' | head -c 120)
+          SHA=$(awk '{print $1}' release/worktime-release.apk.sha256 2>/dev/null || echo "")
           TMP=$(mktemp -d)
           cd "$TMP"
           git init -q
           git remote add origin "https://x-access-token:${TOKEN}@github.com/${{ github.repository }}.git"
           git fetch -q --depth=1 origin gh-pages
           git checkout -q -b gh-pages FETCH_HEAD
-          printf '{\n  "versionName": "%s",\n  "versionCode": %s,\n  "apk": "https://github.com/%s/releases/download/v%s/worktime-release.apk",\n  "apkMirror": "https://ghfast.top/https://github.com/%s/releases/download/v%s/worktime-release.apk",\n  "notes": "%s",\n  "publishedAt": "%s"\n}\n' \
-            "$VER" "${VC:-0}" "${{ github.repository }}" "${VC}" "${{ github.repository }}" "${VC}" "$NOTES" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > version.json
+          printf '{\n  "versionName": "%s",\n  "versionCode": %s,\n  "apk": "https://github.com/%s/releases/download/v%s/worktime-release.apk",\n  "apkMirror": "https://ghfast.top/https://github.com/%s/releases/download/v%s/worktime-release.apk",\n  "sha256": "%s",\n  "notes": "%s",\n  "publishedAt": "%s"\n}\n' \
+            "$VER" "${VC:-0}" "${{ github.repository }}" "${VC}" "${{ github.repository }}" "${VC}" "$SHA" "$NOTES" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > version.json
           cat version.json
           git add version.json
           git -c user.name="worktime-bot" -c user.email="bot@local" commit -q -m "chore: version.json v${VER} [skip ci]" || echo "无变化"
