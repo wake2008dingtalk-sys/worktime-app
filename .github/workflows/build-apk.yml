@@ -1662,6 +1662,8 @@ jobs:
                               DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
                       req.setDestinationInExternalFilesDir(getContext(),
                               Environment.DIRECTORY_DOWNLOADS, "WorkTime-update.apk");
+                      req.setAllowedOverMetered(true);      // 允许移动网络，避免等 Wi-Fi 排队
+                      req.setAllowedOverRoaming(true);
                       downloadId = dm.enqueue(req);
 
                       if (receiver != null) {
@@ -1673,15 +1675,7 @@ jobs:
                               if (intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1) != downloadId) {
                                   return;
                               }
-                              try {
-                                  Uri apkUri = dm.getUriForDownloadedFile(downloadId);
-                                  if (apkUri == null) { return; }
-                                  Intent it = new Intent(Intent.ACTION_VIEW);
-                                  it.setDataAndType(apkUri, "application/vnd.android.package-archive");
-                                  it.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
-                                          | Intent.FLAG_ACTIVITY_NEW_TASK);
-                                  ctx.startActivity(it);
-                              } catch (Exception ignored) {}
+                              launchInstaller(dm, ctx, 0);
                           }
                       };
                       IntentFilter filter = new IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE);
@@ -1698,6 +1692,40 @@ jobs:
                   } catch (Exception e) {
                       call.reject("start failed: " + e.getMessage());
                   }
+              }
+
+              /** 拿到 apk 句柄后立即拉起安装器；句柄偶尔晚到，重试几次避免"点了没反应" */
+              private void launchInstaller(final DownloadManager dm, final Context ctx, final int attempt) {
+                  getActivity().runOnUiThread(new Runnable() {
+                      @Override
+                      public void run() {
+                          try {
+                              Uri apkUri = dm.getUriForDownloadedFile(downloadId);
+                              if (apkUri == null) {
+                                  if (attempt < 8) {
+                                      new android.os.Handler(android.os.Looper.getMainLooper())
+                                              .postDelayed(new Runnable() {
+                                                  @Override public void run() { launchInstaller(dm, ctx, attempt + 1); }
+                                              }, 250);
+                                  }
+                                  return;
+                              }
+                              Intent it = new Intent(Intent.ACTION_VIEW);
+                              it.setDataAndType(apkUri, "application/vnd.android.package-archive");
+                              it.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
+                                      | Intent.FLAG_ACTIVITY_NEW_TASK
+                                      | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+                              ctx.startActivity(it);
+                          } catch (Exception e) {
+                              if (attempt < 8) {
+                                  new android.os.Handler(android.os.Looper.getMainLooper())
+                                          .postDelayed(new Runnable() {
+                                              @Override public void run() { launchInstaller(dm, ctx, attempt + 1); }
+                                          }, 250);
+                              }
+                          }
+                      }
+                  });
               }
 
               @PluginMethod
