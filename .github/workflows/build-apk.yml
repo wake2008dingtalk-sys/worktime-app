@@ -1951,6 +1951,28 @@ jobs:
               print("WARNING: bridge JS not found")
           PYEOF
           python3 /tmp/register_plugin.py
+          # v1.1.82：把 Updater 插件注册进 bridge（必须在 cap sync 之后，否则被覆盖）
+          python3 - <<'PYEOF'
+          import json, os
+          pf = 'android/app/src/main/assets/capacitor.plugins.json'
+          if os.path.exists(pf):
+              with open(pf) as f: data = json.load(f)
+              if not any(x.get('classpath','').endswith('UpdaterPlugin') for x in data):
+                  data.append({'pkg':'com.worktime.tracker','classpath':'com.worktime.tracker.UpdaterPlugin'})
+                  with open(pf,'w') as f: json.dump(data, f, indent=2)
+                  print('Added UpdaterPlugin to capacitor.plugins.json')
+              else:
+                  print('UpdaterPlugin already in plugins.json')
+          bf = 'android/app/src/main/assets/public/capacitor.js'
+          if os.path.exists(bf):
+              with open(bf) as f: c = f.read()
+              if 'UpdaterPluginJS' not in c:
+                  c += "\n/* UpdaterPluginJS */\ntry { var __upd = registerPlugin('Updater'); if (window.Capacitor) { window.Capacitor.Plugins = window.Capacitor.Plugins || {}; window.Capacitor.Plugins.Updater = __upd; } } catch (e) {}\n"
+                  with open(bf,'w') as f: f.write(c)
+                  print('Injected Updater proxy into bridge JS')
+              else:
+                  print('Updater proxy already injected')
+          PYEOF
           cd android
           ./gradlew assembleDebug
           ./gradlew assembleRelease
