@@ -1613,6 +1613,172 @@ jobs:
             print("WARNING: MainActivity.java not found")
           PYEOF
 
+      - name: Add UpdaterPlugin (in-app download + install)
+        run: |
+          python - <<'PYEOF'
+          import os
+          src = 'android/app/src/main/java/com/worktime/tracker'
+          os.makedirs(src, exist_ok=True)
+          java = r'''
+          package com.worktime.tracker;
+
+          import android.app.DownloadManager;
+          import android.content.BroadcastReceiver;
+          import android.content.Context;
+          import android.content.Intent;
+          import android.content.IntentFilter;
+          import android.database.Cursor;
+          import android.net.Uri;
+          import android.os.Build;
+          import android.os.Environment;
+          import com.getcapacitor.JSObject;
+          import com.getcapacitor.Plugin;
+          import com.getcapacitor.PluginCall;
+          import com.getcapacitor.PluginMethod;
+          import com.getcapacitor.annotation.CapacitorPlugin;
+
+          /** v1.1.74 应用内更新：DownloadManager 下载 APK，完成后自动拉起安装器 */
+          @CapacitorPlugin(name = "Updater")
+          public class UpdaterPlugin extends Plugin {
+
+              private long downloadId = -1L;
+              private BroadcastReceiver receiver;
+
+              @PluginMethod
+              public void downloadAndInstall(PluginCall call) {
+                  final String url = call.getString("url");
+                  if (url == null || !url.startsWith("http")) {
+                      call.reject("invalid url");
+                      return;
+                  }
+                  try {
+                      final DownloadManager dm = (DownloadManager) getContext()
+                              .getSystemService(Context.DOWNLOAD_SERVICE);
+                      DownloadManager.Request req = new DownloadManager.Request(Uri.parse(url));
+                      req.setTitle("WorkTime 更新");
+                      req.setDescription("正在下载新版本…");
+                      req.setMimeType("application/vnd.android.package-archive");
+                      req.setNotificationVisibility(
+                              DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
+                      req.setDestinationInExternalFilesDir(getContext(),
+                              Environment.DIRECTORY_DOWNLOADS, "WorkTime-update.apk");
+                      downloadId = dm.enqueue(req);
+
+                      if (receiver != null) {
+                          try { getContext().unregisterReceiver(receiver); } catch (Exception ignored) {}
+                      }
+                      receiver = new BroadcastReceiver() {
+                          @Override
+                          public void onReceive(Context ctx, Intent intent) {
+                              if (intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1) != downloadId) {
+                                  return;
+                              }
+                              try {
+                                  Uri apkUri = dm.getUriForDownloadedFile(downloadId);
+                                  if (apkUri == null) { return; }
+                                  Intent it = new Intent(Intent.ACTION_VIEW);
+                                  it.setDataAndType(apkUri, "application/vnd.android.package-archive");
+                                  it.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
+                                          | Intent.FLAG_ACTIVITY_NEW_TASK);
+                                  ctx.startActivity(it);
+                              } catch (Exception ignored) {}
+                          }
+                      };
+                      IntentFilter filter = new IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE);
+                      if (Build.VERSION.SDK_INT >= 33) {
+                          getContext().registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED);
+                      } else {
+                          getContext().registerReceiver(receiver, filter);
+                      }
+
+                      JSObject r = new JSObject();
+                      r.put("started", true);
+                      r.put("id", downloadId);
+                      call.resolve(r);
+                  } catch (Exception e) {
+                      call.reject("start failed: " + e.getMessage());
+                  }
+              }
+
+              @PluginMethod
+              public void progress(PluginCall call) {
+                  JSObject r = new JSObject();
+                  if (downloadId < 0) {
+                      r.put("status", "idle");
+                      call.resolve(r);
+                      return;
+                  }
+                  DownloadManager dm = (DownloadManager) getContext()
+                          .getSystemService(Context.DOWNLOAD_SERVICE);
+                  Cursor c = null;
+                  try {
+                      c = dm.query(new DownloadManager.Query().setFilterById(downloadId));
+                      if (c != null && c.moveToFirst()) {
+                          long dl = c.getLong(c.getColumnIndexOrThrow(
+                                  DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR));
+                          long total = c.getLong(c.getColumnIndexOrThrow(
+                                  DownloadManager.COLUMN_TOTAL_SIZE_BYTES));
+                          int st = c.getInt(c.getColumnIndexOrThrow(
+                                  DownloadManager.COLUMN_STATUS));
+                          String status = "running";
+                          if (st == DownloadManager.STATUS_SUCCESSFUL) { status = "done"; }
+                          else if (st == DownloadManager.STATUS_FAILED) { status = "failed"; }
+                          r.put("downloaded", dl);
+                          r.put("total", total);
+                          r.put("status", status);
+                      } else {
+                          r.put("status", "idle");
+                      }
+                  } catch (Exception e) {
+                      r.put("status", "idle");
+                  } finally {
+                      if (c != null) { try { c.close(); } catch (Exception ignored) {} }
+                  }
+                  call.resolve(r);
+              }
+          }
+          '''
+          with open(os.path.join(src, 'UpdaterPlugin.java'), 'w') as f:
+              f.write(java)
+          print('Wrote UpdaterPlugin.java')
+
+          main = os.path.join(src, 'MainActivity.java')
+          if os.path.exists(main):
+              with open(main, 'r') as f:
+                  content = f.read()
+              if 'import com.worktime.tracker.UpdaterPlugin' not in content:
+                  content = content.replace(
+                      'import com.getcapacitor.BridgeActivity;',
+                      'import com.getcapacitor.BridgeActivity;\nimport com.worktime.tracker.UpdaterPlugin;'
+                  )
+              if 'registerPlugin(UpdaterPlugin.class)' not in content:
+                  content = content.replace(
+                      'super.onCreate(savedInstanceState);',
+                      'super.onCreate(savedInstanceState);\n        registerPlugin(UpdaterPlugin.class);'
+                  )
+              with open(main, 'w') as f:
+                  f.write(content)
+              print('UpdaterPlugin registered in MainActivity')
+          else:
+              print('WARNING: MainActivity.java not found')
+
+          manifest = 'android/app/src/main/AndroidManifest.xml'
+          with open(manifest) as f:
+              m = f.read()
+          perm = '<uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />'
+          if 'REQUEST_INSTALL_PACKAGES' not in m:
+              idx = m.find('<application')
+              if idx > 0:
+                  m = m[:idx] + '    ' + perm + '\n    ' + m[idx:]
+              else:
+                  m = m.replace('</manifest>', '    ' + perm + '\n</manifest>')
+              with open(manifest, 'w') as f:
+                  f.write(m)
+              print('REQUEST_INSTALL_PACKAGES added')
+          else:
+              print('REQUEST_INSTALL_PACKAGES already present')
+          PYEOF
+
       - name: Set app version and SDK levels (v1.1.7 上架版)
         run: |
           # 应用商店要求：targetSdkVersion >= 34，版本号随每次上架递增。
@@ -1862,6 +2028,30 @@ jobs:
           generate_release_notes: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # v1.1.74：写 version.json 到 gh-pages，供 APK 内检查更新
+      - name: Publish version.json to gh-pages
+        if: github.ref == 'refs/heads/main'
+        continue-on-error: true
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VER=$(grep -oE 'var APP_VERSION = "[^"]+"' index.html | head -1 | sed 's/.*"\(.*\)"/\1/')
+          VC=$(grep -o 'versionCode [0-9]*' android/app/build.gradle | head -1 | grep -o '[0-9]*' || echo "")
+          [ -z "$VER" ] && echo "未读到版本，跳过" && exit 0
+          NOTES=$(git log -1 --pretty=%s | tr -d '"' | head -c 120)
+          TMP=$(mktemp -d)
+          cd "$TMP"
+          git init -q
+          git remote add origin "https://x-access-token:${TOKEN}@github.com/${{ github.repository }}.git"
+          git fetch -q --depth=1 origin gh-pages
+          git checkout -q -b gh-pages FETCH_HEAD
+          printf '{\n  "versionName": "%s",\n  "versionCode": %s,\n  "apk": "https://github.com/%s/releases/download/v%s/worktime-release.apk",\n  "notes": "%s",\n  "publishedAt": "%s"\n}\n' \
+            "$VER" "${VC:-0}" "${{ github.repository }}" "${VC}" "$NOTES" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > version.json
+          cat version.json
+          git add version.json
+          git -c user.name="worktime-bot" -c user.email="bot@local" commit -q -m "chore: version.json v${VER} [skip ci]" || echo "无变化"
+          git push -q origin gh-pages && echo "version.json 已发布 v${VER}"
 
       # v1.1.59：README 顶部版本块自动更新（不依赖 PAT，用 GITHUB_TOKEN 推 commit）
       - name: Sync README version block
