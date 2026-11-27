@@ -1622,7 +1622,6 @@ jobs:
           java = r'''
           package com.worktime.tracker;
 
-          import android.content.Context;
           import android.content.Intent;
           import android.net.Uri;
           import android.os.Handler;
@@ -1634,24 +1633,29 @@ jobs:
           import com.getcapacitor.PluginMethod;
           import com.getcapacitor.annotation.CapacitorPlugin;
 
+          import org.json.JSONArray;
+
           import java.io.File;
-          import java.io.FileOutputStream;
           import java.io.InputStream;
+          import java.io.RandomAccessFile;
           import java.net.HttpURLConnection;
           import java.net.URL;
+          import java.util.ArrayList;
+          import java.util.List;
+          import java.util.concurrent.atomic.AtomicLong;
 
           /**
-           * v1.1.87 应用内更新（自建下载，不走系统下载队列）
-           * 之前用 DownloadManager，入队后长时间停在 PENDING（totals 为 -1），
-           * UI 只能显示"正在启动下载…"，且按钮还能再点导致重复入队。
-           * 现在自己开线程用 HttpURLConnection 拉取，进度直接上报给 JS，响应即时。
+           * v1.1.91 应用内更新：多线路 + 多线程分段下载
+           * 1) 依次尝试 version.json 给的镜像/官方地址，先探 Range 支持
+           * 2) 支持 206 就切成 6 段并行拉，各自 RandomAccessFile 定位写入
+           * 3) 不支持 Range 则退回单流下载
            */
           @CapacitorPlugin(name = "Updater")
           public class UpdaterPlugin extends Plugin {
 
-              private static volatile long DL = 0;
+              private static final AtomicLong DL = new AtomicLong(0);
               private static volatile long TOT = 0;
-              private static volatile String ST = "idle";   // idle|running|ready|failed
+              private static volatile String ST = "idle";
               private Thread worker = null;
 
               private File apkFile() {
@@ -1660,67 +1664,167 @@ jobs:
 
               @PluginMethod
               public void downloadAndInstall(final PluginCall call) {
-                  final String url = call.getString("url");
-                  if (url == null || !url.startsWith("http")) { call.reject("invalid url"); return; }
+                  final List<String> urls = new ArrayList<>();
+                  JSONArray arr = call.getArray("urls");
+                  if (arr != null) {
+                      for (int i = 0; i < arr.length(); i++) {
+                          String u = arr.optString(i, null);
+                          if (u != null && u.startsWith("http") && !urls.contains(u)) urls.add(u);
+                      }
+                  }
+                  String single = call.getString("url");
+                  if (urls.isEmpty() && single != null && single.startsWith("http")) urls.add(single);
+                  if (urls.isEmpty()) { call.reject("invalid url"); return; }
+
                   if (worker != null && worker.isAlive()) {
                       JSObject r = new JSObject();
                       r.put("started", true);
                       r.put("reused", true);
-                      call.resolve(r);          // 已在下载中，直接复用，不重复下载
+                      call.resolve(r);
                       return;
                   }
-                  DL = 0; TOT = 0; ST = "running";
+
+                  DL.set(0); TOT = 0; ST = "running";
                   final File target = apkFile();
                   worker = new Thread(new Runnable() {
                       @Override public void run() {
-                          HttpURLConnection conn = null;
-                          InputStream in = null;
-                          FileOutputStream out = null;
-                          try {
-                              if (target.exists()) { target.delete(); }
-                              URL u = new URL(url);
-                              conn = (HttpURLConnection) u.openConnection();
-                              conn.setInstanceFollowRedirects(true);
-                              conn.setConnectTimeout(15000);
-                              conn.setReadTimeout(30000);
-                              conn.setRequestProperty("User-Agent", "WorkTime-Updater");
-                              conn.connect();
-                              int code = conn.getResponseCode();
-                              if (code >= 400) { ST = "failed"; return; }
-                              TOT = conn.getContentLength();   // 可能为 -1（分块传输）
-                              in = conn.getInputStream();
-                              out = new FileOutputStream(target);
-                              byte[] buf = new byte[64 * 1024];
-                              int n;
-                              while ((n = in.read(buf)) > 0) {
-                                  out.write(buf, 0, n);
-                                  DL += n;
-                              }
-                              out.flush();
-                              ST = "ready";
-                              new Handler(Looper.getMainLooper()).post(new Runnable() {
-                                  @Override public void run() { installApk(target, 0); }
-                              });
-                          } catch (Exception e) {
-                              ST = "failed";
-                          } finally {
-                              try { if (out != null) out.close(); } catch (Exception ignored) {}
-                              try { if (in != null) in.close(); } catch (Exception ignored) {}
-                              try { if (conn != null) conn.disconnect(); } catch (Exception ignored) {}
+                          for (String u : urls) {
+                              try {
+                                  if (fetch(u, target)) {
+                                      ST = "ready";
+                                      new Handler(Looper.getMainLooper()).post(new Runnable() {
+                                          @Override public void run() { installApk(target, 0); }
+                                      });
+                                      return;
+                                  }
+                              } catch (Exception ignored) {}
                           }
+                          ST = "failed";
                       }
                   });
                   worker.start();
                   JSObject r = new JSObject();
                   r.put("started", true);
-                  r.put("reused", false);
+                  r.put("urls", urls.size());
                   call.resolve(r);
+              }
+
+              private boolean fetch(String url, File target) {
+                  HttpURLConnection probe = null;
+                  try {
+                      probe = (HttpURLConnection) new URL(url).openConnection();
+                      probe.setConnectTimeout(8000);
+                      probe.setReadTimeout(15000);
+                      probe.setRequestProperty("Range", "bytes=0-0");
+                      probe.setRequestProperty("User-Agent", "WorkTime-Updater");
+                      int code = probe.getResponseCode();
+                      long total = -1;
+                      boolean rangeOk = (code == 206);
+                      String cr = probe.getHeaderField("Content-Range");
+                      if (cr != null && cr.contains("/")) {
+                          try { total = Long.parseLong(cr.substring(cr.indexOf('/') + 1).trim()); } catch (Exception ignored) {}
+                      }
+                      if (!rangeOk && code == 200) total = probe.getContentLength();
+                      probe.disconnect();
+                      probe = null;
+                      if (total <= 0) return false;
+
+                      TOT = total;
+                      if (rangeOk && total > 3 * 1024 * 1024) return fetchParallel(url, target, total);
+                      return fetchSingle(url, target);
+                  } catch (Exception e) {
+                      return false;
+                  } finally {
+                      try { if (probe != null) probe.disconnect(); } catch (Exception ignored) {}
+                  }
+              }
+
+              private boolean fetchParallel(String url, final File target, long total) {
+                  final int parts = 6;
+                  final long chunk = total / parts + 1;
+                  try {
+                      if (target.exists()) target.delete();
+                      RandomAccessFile raf = new RandomAccessFile(target, "rw");
+                      raf.setLength(total);
+                      raf.close();
+
+                      Thread[] ts = new Thread[parts];
+                      final boolean[] failed = new boolean[]{false};
+                      for (int i = 0; i < parts; i++) {
+                          final long start = i * chunk;
+                          final long end = Math.min(total - 1, start + chunk - 1);
+                          if (start > end) continue;
+                          ts[i] = new Thread(new Runnable() {
+                              @Override public void run() {
+                                  RandomAccessFile f = null;
+                                  HttpURLConnection c = null;
+                                  try {
+                                      f = new RandomAccessFile(target, "rw");
+                                      f.seek(start);
+                                      c = (HttpURLConnection) new URL(url).openConnection();
+                                      c.setConnectTimeout(8000);
+                                      c.setReadTimeout(20000);
+                                      c.setRequestProperty("Range", "bytes=" + start + "-" + end);
+                                      c.setRequestProperty("User-Agent", "WorkTime-Updater");
+                                      if (c.getResponseCode() != 206) { failed[0] = true; return; }
+                                      InputStream in = c.getInputStream();
+                                      byte[] buf = new byte[64 * 1024];
+                                      int n;
+                                      while ((n = in.read(buf)) > 0) {
+                                          f.write(buf, 0, n);
+                                          DL.addAndGet(n);
+                                      }
+                                      in.close();
+                                  } catch (Exception e) {
+                                      failed[0] = true;
+                                  } finally {
+                                      try { if (f != null) f.close(); } catch (Exception ignored) {}
+                                      try { if (c != null) c.disconnect(); } catch (Exception ignored) {}
+                                  }
+                              }
+                          });
+                          ts[i].start();
+                      }
+                      for (Thread t : ts) { if (t != null) t.join(); }
+                      return !failed[0] && target.length() == total;
+                  } catch (Exception e) {
+                      return false;
+                  }
+              }
+
+              private boolean fetchSingle(String url, File target) {
+                  HttpURLConnection c = null;
+                  try {
+                      if (target.exists()) target.delete();
+                      c = (HttpURLConnection) new URL(url).openConnection();
+                      c.setConnectTimeout(10000);
+                      c.setReadTimeout(25000);
+                      c.setInstanceFollowRedirects(true);
+                      c.setRequestProperty("User-Agent", "WorkTime-Updater");
+                      if (c.getResponseCode() >= 400) return false;
+                      if (TOT <= 0) TOT = c.getContentLength();
+                      InputStream in = c.getInputStream();
+                      RandomAccessFile f = new RandomAccessFile(target, "rw");
+                      byte[] buf = new byte[64 * 1024];
+                      int n;
+                      while ((n = in.read(buf)) > 0) {
+                          f.write(buf, 0, n);
+                          DL.addAndGet(n);
+                      }
+                      f.close();
+                      in.close();
+                      return target.length() > 0;
+                  } catch (Exception e) {
+                      return false;
+                  } finally {
+                      try { if (c != null) c.disconnect(); } catch (Exception ignored) {}
+                  }
               }
 
               @PluginMethod
               public void progress(PluginCall call) {
                   JSObject r = new JSObject();
-                  r.put("downloaded", DL);
+                  r.put("downloaded", DL.get());
                   r.put("total", TOT);
                   r.put("status", ST);
                   call.resolve(r);
@@ -1742,10 +1846,8 @@ jobs:
                                   if (attempt < 8) retry(f, attempt);
                                   return;
                               }
-                              Uri uri = FileProvider.getUriForFile(
-                                      getContext(),
-                                      getContext().getPackageName() + ".fileprovider",
-                                      f);
+                              Uri uri = FileProvider.getUriForFile(getContext(),
+                                      getContext().getPackageName() + ".fileprovider", f);
                               Intent it = new Intent(Intent.ACTION_VIEW);
                               it.setDataAndType(uri, "application/vnd.android.package-archive");
                               it.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
@@ -1766,6 +1868,7 @@ jobs:
               }
           }
           '''
+
           with open(os.path.join(src, 'UpdaterPlugin.java'), 'w') as f:
               f.write(java)
           print('Wrote UpdaterPlugin.java')
