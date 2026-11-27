@@ -1622,147 +1622,147 @@ jobs:
           java = r'''
           package com.worktime.tracker;
 
-          import android.app.DownloadManager;
-          import android.content.BroadcastReceiver;
           import android.content.Context;
           import android.content.Intent;
-          import android.content.IntentFilter;
-          import android.database.Cursor;
           import android.net.Uri;
-          import android.os.Build;
-          import android.os.Environment;
+          import android.os.Handler;
+          import android.os.Looper;
+          import androidx.core.content.FileProvider;
           import com.getcapacitor.JSObject;
           import com.getcapacitor.Plugin;
           import com.getcapacitor.PluginCall;
           import com.getcapacitor.PluginMethod;
           import com.getcapacitor.annotation.CapacitorPlugin;
 
-          /** v1.1.74 应用内更新：DownloadManager 下载 APK，完成后自动拉起安装器 */
+          import java.io.File;
+          import java.io.FileOutputStream;
+          import java.io.InputStream;
+          import java.net.HttpURLConnection;
+          import java.net.URL;
+
+          /**
+           * v1.1.87 应用内更新（自建下载，不走系统下载队列）
+           * 之前用 DownloadManager，入队后长时间停在 PENDING（totals 为 -1），
+           * UI 只能显示"正在启动下载…"，且按钮还能再点导致重复入队。
+           * 现在自己开线程用 HttpURLConnection 拉取，进度直接上报给 JS，响应即时。
+           */
           @CapacitorPlugin(name = "Updater")
           public class UpdaterPlugin extends Plugin {
 
-              private long downloadId = -1L;
-              private BroadcastReceiver receiver;
+              private static volatile long DL = 0;
+              private static volatile long TOT = 0;
+              private static volatile String ST = "idle";   // idle|running|ready|failed
+              private Thread worker = null;
 
-              @PluginMethod
-              public void downloadAndInstall(PluginCall call) {
-                  final String url = call.getString("url");
-                  if (url == null || !url.startsWith("http")) {
-                      call.reject("invalid url");
-                      return;
-                  }
-                  try {
-                      final DownloadManager dm = (DownloadManager) getContext()
-                              .getSystemService(Context.DOWNLOAD_SERVICE);
-                      DownloadManager.Request req = new DownloadManager.Request(Uri.parse(url));
-                      req.setTitle("WorkTime 更新");
-                      req.setDescription("正在下载新版本…");
-                      req.setMimeType("application/vnd.android.package-archive");
-                      req.setNotificationVisibility(
-                              DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
-                      req.setDestinationInExternalFilesDir(getContext(),
-                              Environment.DIRECTORY_DOWNLOADS, "WorkTime-update.apk");
-                      req.setAllowedOverMetered(true);      // 允许移动网络，避免等 Wi-Fi 排队
-                      req.setAllowedOverRoaming(true);
-                      downloadId = dm.enqueue(req);
-
-                      if (receiver != null) {
-                          try { getContext().unregisterReceiver(receiver); } catch (Exception ignored) {}
-                      }
-                      receiver = new BroadcastReceiver() {
-                          @Override
-                          public void onReceive(Context ctx, Intent intent) {
-                              if (intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1) != downloadId) {
-                                  return;
-                              }
-                              launchInstaller(dm, ctx, 0);
-                          }
-                      };
-                      IntentFilter filter = new IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE);
-                      if (Build.VERSION.SDK_INT >= 33) {
-                          getContext().registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED);
-                      } else {
-                          getContext().registerReceiver(receiver, filter);
-                      }
-
-                      JSObject r = new JSObject();
-                      r.put("started", true);
-                      r.put("id", downloadId);
-                      call.resolve(r);
-                  } catch (Exception e) {
-                      call.reject("start failed: " + e.getMessage());
-                  }
+              private File apkFile() {
+                  return new File(getContext().getExternalFilesDir(null), "WorkTime-update.apk");
               }
 
-              /** 拿到 apk 句柄后立即拉起安装器；句柄偶尔晚到，重试几次避免"点了没反应" */
-              private void launchInstaller(final DownloadManager dm, final Context ctx, final int attempt) {
-                  getActivity().runOnUiThread(new Runnable() {
-                      @Override
-                      public void run() {
+              @PluginMethod
+              public void downloadAndInstall(final PluginCall call) {
+                  final String url = call.getString("url");
+                  if (url == null || !url.startsWith("http")) { call.reject("invalid url"); return; }
+                  if (worker != null && worker.isAlive()) {
+                      JSObject r = new JSObject();
+                      r.put("started", true);
+                      r.put("reused", true);
+                      call.resolve(r);          // 已在下载中，直接复用，不重复下载
+                      return;
+                  }
+                  DL = 0; TOT = 0; ST = "running";
+                  final File target = apkFile();
+                  worker = new Thread(new Runnable() {
+                      @Override public void run() {
+                          HttpURLConnection conn = null;
+                          InputStream in = null;
+                          FileOutputStream out = null;
                           try {
-                              Uri apkUri = dm.getUriForDownloadedFile(downloadId);
-                              if (apkUri == null) {
-                                  if (attempt < 8) {
-                                      new android.os.Handler(android.os.Looper.getMainLooper())
-                                              .postDelayed(new Runnable() {
-                                                  @Override public void run() { launchInstaller(dm, ctx, attempt + 1); }
-                                              }, 250);
-                                  }
-                                  return;
+                              if (target.exists()) { target.delete(); }
+                              URL u = new URL(url);
+                              conn = (HttpURLConnection) u.openConnection();
+                              conn.setInstanceFollowRedirects(true);
+                              conn.setConnectTimeout(15000);
+                              conn.setReadTimeout(30000);
+                              conn.setRequestProperty("User-Agent", "WorkTime-Updater");
+                              conn.connect();
+                              int code = conn.getResponseCode();
+                              if (code >= 400) { ST = "failed"; return; }
+                              TOT = conn.getContentLength();   // 可能为 -1（分块传输）
+                              in = conn.getInputStream();
+                              out = new FileOutputStream(target);
+                              byte[] buf = new byte[64 * 1024];
+                              int n;
+                              while ((n = in.read(buf)) > 0) {
+                                  out.write(buf, 0, n);
+                                  DL += n;
                               }
-                              Intent it = new Intent(Intent.ACTION_VIEW);
-                              it.setDataAndType(apkUri, "application/vnd.android.package-archive");
-                              it.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
-                                      | Intent.FLAG_ACTIVITY_NEW_TASK
-                                      | Intent.FLAG_ACTIVITY_CLEAR_TOP);
-                              ctx.startActivity(it);
+                              out.flush();
+                              ST = "ready";
+                              new Handler(Looper.getMainLooper()).post(new Runnable() {
+                                  @Override public void run() { installApk(target, 0); }
+                              });
                           } catch (Exception e) {
-                              if (attempt < 8) {
-                                  new android.os.Handler(android.os.Looper.getMainLooper())
-                                          .postDelayed(new Runnable() {
-                                              @Override public void run() { launchInstaller(dm, ctx, attempt + 1); }
-                                          }, 250);
-                              }
+                              ST = "failed";
+                          } finally {
+                              try { if (out != null) out.close(); } catch (Exception ignored) {}
+                              try { if (in != null) in.close(); } catch (Exception ignored) {}
+                              try { if (conn != null) conn.disconnect(); } catch (Exception ignored) {}
                           }
                       }
                   });
+                  worker.start();
+                  JSObject r = new JSObject();
+                  r.put("started", true);
+                  r.put("reused", false);
+                  call.resolve(r);
               }
 
               @PluginMethod
               public void progress(PluginCall call) {
                   JSObject r = new JSObject();
-                  if (downloadId < 0) {
-                      r.put("status", "idle");
-                      call.resolve(r);
-                      return;
-                  }
-                  DownloadManager dm = (DownloadManager) getContext()
-                          .getSystemService(Context.DOWNLOAD_SERVICE);
-                  Cursor c = null;
-                  try {
-                      c = dm.query(new DownloadManager.Query().setFilterById(downloadId));
-                      if (c != null && c.moveToFirst()) {
-                          long dl = c.getLong(c.getColumnIndexOrThrow(
-                                  DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR));
-                          long total = c.getLong(c.getColumnIndexOrThrow(
-                                  DownloadManager.COLUMN_TOTAL_SIZE_BYTES));
-                          int st = c.getInt(c.getColumnIndexOrThrow(
-                                  DownloadManager.COLUMN_STATUS));
-                          String status = "running";
-                          if (st == DownloadManager.STATUS_SUCCESSFUL) { status = "done"; }
-                          else if (st == DownloadManager.STATUS_FAILED) { status = "failed"; }
-                          r.put("downloaded", dl);
-                          r.put("total", total);
-                          r.put("status", status);
-                      } else {
-                          r.put("status", "idle");
-                      }
-                  } catch (Exception e) {
-                      r.put("status", "idle");
-                  } finally {
-                      if (c != null) { try { c.close(); } catch (Exception ignored) {} }
-                  }
+                  r.put("downloaded", DL);
+                  r.put("total", TOT);
+                  r.put("status", ST);
                   call.resolve(r);
+              }
+
+              @PluginMethod
+              public void install(PluginCall call) {
+                  installApk(apkFile(), 0);
+                  JSObject r = new JSObject();
+                  r.put("ok", true);
+                  call.resolve(r);
+              }
+
+              private void installApk(final File f, final int attempt) {
+                  getActivity().runOnUiThread(new Runnable() {
+                      @Override public void run() {
+                          try {
+                              if (!f.exists() || f.length() == 0) {
+                                  if (attempt < 8) retry(f, attempt);
+                                  return;
+                              }
+                              Uri uri = FileProvider.getUriForFile(
+                                      getContext(),
+                                      getContext().getPackageName() + ".fileprovider",
+                                      f);
+                              Intent it = new Intent(Intent.ACTION_VIEW);
+                              it.setDataAndType(uri, "application/vnd.android.package-archive");
+                              it.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
+                                      | Intent.FLAG_ACTIVITY_NEW_TASK
+                                      | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+                              getContext().startActivity(it);
+                          } catch (Exception e) {
+                              if (attempt < 8) retry(f, attempt);
+                          }
+                      }
+                  });
+              }
+
+              private void retry(final File f, final int attempt) {
+                  new Handler(Looper.getMainLooper()).postDelayed(new Runnable() {
+                      @Override public void run() { installApk(f, attempt + 1); }
+                  }, 250);
               }
           }
           '''
@@ -1793,6 +1793,20 @@ jobs:
           manifest = 'android/app/src/main/AndroidManifest.xml'
           with open(manifest) as f:
               m = f.read()
+          # FileProvider：Android 7+ 安装本地 APK 必须用 content:// 而不是 file://
+          if 'com.worktime.tracker.fileprovider' not in m:
+              prov = ('        <provider\n'
+                      '            android:name="androidx.core.content.FileProvider"\n'
+                      '            android:authorities="com.worktime.tracker.fileprovider"\n'
+                      '            android:exported="false"\n'
+                      '            android:grantUriPermissions="true">\n'
+                      '            <meta-data\n'
+                      '                android:name="android.support.FILE_PROVIDER_PATHS"\n'
+                      '                android:resource="@xml/file_paths" />\n'
+                      '        </provider>\n')
+              m = m.replace('    </application>', prov + '    </application>')
+              print('FileProvider added to manifest')
+
           perm = '<uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />'
           if 'REQUEST_INSTALL_PACKAGES' not in m:
               idx = m.find('<application')
@@ -1805,6 +1819,18 @@ jobs:
               print('REQUEST_INSTALL_PACKAGES added')
           else:
               print('REQUEST_INSTALL_PACKAGES already present')
+
+          xml_dir = 'android/app/src/main/res/xml'
+          os.makedirs(xml_dir, exist_ok=True)
+          fp = os.path.join(xml_dir, 'file_paths.xml')
+          if not os.path.exists(fp):
+              with open(fp, 'w') as f:
+                  f.write('<?xml version="1.0" encoding="utf-8"?>\n'
+                          '<paths>\n'
+                          '    <external-files-path name="updates" path="." />\n'
+                          '    <files-path name="files" path="." />\n'
+                          '</paths>\n')
+              print('Wrote res/xml/file_paths.xml')
           PYEOF
 
       - name: Set app version and SDK levels (v1.1.7 上架版)
