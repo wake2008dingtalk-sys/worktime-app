@@ -1766,65 +1766,72 @@ jobs:
               }
 
               private boolean fetchParallel(String url, final File target, long total) {
-                  final int parts = 6;
+                  /* 动态分块：切 32 小块，6 个线程抢着领。
+                     均分 6 段时，某段慢会拖住整体；分块队列能把慢块的影响限制在 1/32。 */
                   final String src = url;
-                  final long chunk = total / parts + 1;
+                  final int THREADS = 6;
+                  final int CHUNKS = 32;
+                  final long chunk = (total + CHUNKS - 1) / CHUNKS;
+                  final java.util.concurrent.atomic.AtomicInteger cursor =
+                          new java.util.concurrent.atomic.AtomicInteger(0);
                   try {
                       if (target.exists()) target.delete();
                       RandomAccessFile raf = new RandomAccessFile(target, "rw");
                       raf.setLength(total);
                       raf.close();
 
-                      Thread[] ts = new Thread[parts];
+                      Thread[] ts = new Thread[THREADS];
                       final boolean[] failed = new boolean[]{false};
-                      for (int i = 0; i < parts; i++) {
-                          final long start = i * chunk;
-                          final long end = Math.min(total - 1, start + chunk - 1);
-                          if (start > end) continue;
-                          ts[i] = new Thread(new Runnable() {
+                      for (int t = 0; t < THREADS; t++) {
+                          ts[t] = new Thread(new Runnable() {
                               @Override public void run() {
-                                  long written = 0;
-                                  long want = end - start + 1;
-                                  /* 每段最多重试 4 次，并从中断处续传，
-                                     避免最后一段卡住导致整体停在 99% */
-                                  for (int attempt = 0; attempt < 4 && written < want; attempt++) {
-                                      RandomAccessFile f = null;
-                                      HttpURLConnection c = null;
-                                      try {
-                                          long from = start + written;
-                                          f = new RandomAccessFile(target, "rw");
-                                          f.seek(from);
-                                          c = (HttpURLConnection) new URL(src).openConnection();
-                                          c.setConnectTimeout(8000);
-                                          c.setReadTimeout(30000);
-                                          c.setRequestProperty("Range", "bytes=" + from + "-" + end);
-                                          c.setRequestProperty("User-Agent", "WorkTime-Updater");
-                                          if (c.getResponseCode() != 206) { continue; }
-                                          String cr = c.getHeaderField("Content-Range");
-                                          if (cr == null || !cr.startsWith("bytes " + from + "-")) { continue; }
-                                          InputStream in = c.getInputStream();
-                                          byte[] buf = new byte[64 * 1024];
-                                          int n;
-                                          long remaining = want - written;
-                                          while (remaining > 0 &&
-                                                 (n = in.read(buf, 0, (int) Math.min(buf.length, remaining))) > 0) {
-                                              f.write(buf, 0, n);
-                                              DL.addAndGet(n);
-                                              written += n;
-                                              remaining -= n;
+                                  int idx;
+                                  while ((idx = cursor.getAndIncrement()) < CHUNKS) {
+                                      if (failed[0]) return;
+                                      long start = idx * chunk;
+                                      long end = Math.min(total - 1, start + chunk - 1);
+                                      if (start > end) continue;
+                                      long written = 0;
+                                      long want = end - start + 1;
+                                      for (int attempt = 0; attempt < 4 && written < want; attempt++) {
+                                          RandomAccessFile f = null;
+                                          HttpURLConnection c = null;
+                                          try {
+                                              long from = start + written;
+                                              f = new RandomAccessFile(target, "rw");
+                                              f.seek(from);
+                                              c = (HttpURLConnection) new URL(src).openConnection();
+                                              c.setConnectTimeout(8000);
+                                              c.setReadTimeout(30000);
+                                              c.setRequestProperty("Range", "bytes=" + from + "-" + end);
+                                              c.setRequestProperty("User-Agent", "WorkTime-Updater");
+                                              if (c.getResponseCode() != 206) { continue; }
+                                              String cr = c.getHeaderField("Content-Range");
+                                              if (cr == null || !cr.startsWith("bytes " + from + "-")) { continue; }
+                                              InputStream in = c.getInputStream();
+                                              byte[] buf = new byte[64 * 1024];
+                                              int n;
+                                              long remaining = want - written;
+                                              while (remaining > 0 &&
+                                                     (n = in.read(buf, 0, (int) Math.min(buf.length, remaining))) > 0) {
+                                                  f.write(buf, 0, n);
+                                                  DL.addAndGet(n);
+                                                  written += n;
+                                                  remaining -= n;
+                                              }
+                                              in.close();
+                                          } catch (Exception e) {
+                                              /* 断点续传：下次从 written 处继续 */
+                                          } finally {
+                                              try { if (f != null) f.close(); } catch (Exception ignored) {}
+                                              try { if (c != null) c.disconnect(); } catch (Exception ignored) {}
                                           }
-                                          in.close();
-                                      } catch (Exception e) {
-                                          /* 断点续传：下一次从 written 处继续 */
-                                      } finally {
-                                          try { if (f != null) f.close(); } catch (Exception ignored) {}
-                                          try { if (c != null) c.disconnect(); } catch (Exception ignored) {}
                                       }
+                                      if (written < want) { failed[0] = true; return; }
                                   }
-                                  if (written < want) failed[0] = true;
                               }
                           });
-                          ts[i].start();
+                          ts[t].start();
                       }
                       for (Thread t : ts) { if (t != null) t.join(); }
                       boolean ok = !failed[0] && target.length() == total;
@@ -2070,7 +2077,7 @@ jobs:
           abi_block = '\n'.join([
               '',
               '        ndk {',
-              "            abiFilters 'arm64-v8a', 'armeabi-v7a'",
+              "            abiFilters 'arm64-v8a'",
               '        }',
               '',
           ])
