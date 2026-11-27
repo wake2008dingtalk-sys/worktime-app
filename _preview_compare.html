@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>WorkTime · 入场动画对比</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; background: #070b11;
+    font: 14px/1.5 -apple-system, "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+    color: #d6e4f0; display: flex; flex-direction: column; align-items: center; gap: 18px; padding: 22px 16px 30px;
+  }
+  h1 { font-size: 17px; font-weight: 600; margin: 0; letter-spacing: .3px; }
+  .hint { color: #6f8296; font-size: 12.5px; margin: -10px 0 0; }
+  .row { display: flex; gap: 22px; flex-wrap: wrap; justify-content: center; }
+  .pane { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+  .label { font-size: 12.5px; color: #9fb4c8; display: flex; align-items: center; gap: 8px; }
+  .tag { font-size: 11px; padding: 2px 7px; border-radius: 5px; border: 1px solid #24425c; color: #6fb7d8; }
+  .tag.new { border-color: #2f6b4a; color: #6fd89b; }
+  .phone {
+    width: 300px; height: 640px; border-radius: 22px; overflow: hidden;
+    border: 1px solid #20303f; background: #05080d;
+    box-shadow: 0 18px 40px rgba(0,0,0,.55), inset 0 0 0 3px #0d141c;
+  }
+  iframe { width: 100%; height: 100%; border: 0; display: block; background: #05080d; }
+  .actions { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+  button {
+    background: #10283a; color: #8fe3ff; border: 1px solid #23536f; border-radius: 9px;
+    padding: 9px 18px; font-size: 13px; cursor: pointer; transition: .15s;
+  }
+  button:hover { background: #16374e; border-color: #2f7396; }
+  .note { color: #5f7387; font-size: 12px; max-width: 720px; text-align: center; line-height: 1.7; }
+  code { background: #0f1a24; padding: 1px 5px; border-radius: 4px; color: #9fd3ea; font-size: 11.5px; }
+</style>
+</head>
+<body>
+  <h1>WorkTime 入场动画对比</h1>
+  <p class="hint">左侧为 v1.1.44 纯 CSS 版，右侧为 v1.1.65 视频版；点击重播可反复观看</p>
+
+  <div class="row">
+    <div class="pane">
+      <div class="label">旧版 · 纯 CSS 四段<span class="tag">v1.1.44</span></div>
+      <div class="phone"><iframe id="fOld" src="./_preview_old.html" title="旧版"></iframe></div>
+    </div>
+    <div class="pane">
+      <div class="label">当前版 · 1080P 视频<span class="tag new">v1.1.65</span></div>
+      <div class="phone"><iframe id="fCur" src="./_preview_current.html" title="当前版"></iframe></div>
+    </div>
+  </div>
+
+  <div class="actions">
+    <button onclick="replayBoth()">▶ 同时重播</button>
+    <button onclick="replayOne('fOld')">只看旧版</button>
+    <button onclick="replayOne('fCur')">只看当前版</button>
+  </div>
+
+  <p class="note">
+    旧版：路网俯冲 → 雷达扫描 → 三层冲击波收束成对勾 → 全息底座托起表盘，全程 CSS 绘制、零额外体积。<br>
+    当前版：视频作底层（3.3 MB），海报帧内联消除黑屏，品牌字与 HUD 四角由 CSS 叠加；首次播 3.54 s，之后 2.5 s。
+  </p>
+
+<script>
+function replayOne(id) {
+  const f = document.getElementById(id);
+  try { f.contentWindow.replay(); } catch (e) {
+    try { f.src = f.src; } catch (e2) {}
+  }
+}
+function replayBoth() { replayOne('fOld'); replayOne('fCur'); }
+</script>
+</body>
+</html>
