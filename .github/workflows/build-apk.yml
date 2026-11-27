@@ -1730,12 +1730,36 @@ jobs:
                       if (total <= 0) return false;
 
                       TOT = total;
-                      if (rangeOk && total > 3 * 1024 * 1024) return fetchParallel(url, target, total);
+                      if (rangeOk && total > 3 * 1024 * 1024 && rangeSane(url)) {
+                          return fetchParallel(url, target, total);
+                      }
                       return fetchSingle(url, target);
                   } catch (Exception e) {
                       return false;
                   } finally {
                       try { if (probe != null) probe.disconnect(); } catch (Exception ignored) {}
+                  }
+              }
+
+              /** 有些镜像/加速站点表面回 206，实际仍从 0 开始整包返回，
+                  会导致分段写入越界。这里用中间区间探一次，起点对不上就不分段。 */
+              private boolean rangeSane(String url) {
+                  HttpURLConnection c = null;
+                  try {
+                      long probeStart = 1024 * 1024;   // 1MB 处取 64 字节
+                      c = (HttpURLConnection) new URL(url).openConnection();
+                      c.setConnectTimeout(8000);
+                      c.setReadTimeout(10000);
+                      c.setRequestProperty("Range", "bytes=" + probeStart + "-" + (probeStart + 63));
+                      c.setRequestProperty("User-Agent", "WorkTime-Updater");
+                      if (c.getResponseCode() != 206) return false;
+                      String cr = c.getHeaderField("Content-Range");
+                      if (cr == null || !cr.startsWith("bytes " + probeStart + "-")) return false;
+                      return true;
+                  } catch (Exception e) {
+                      return false;
+                  } finally {
+                      try { if (c != null) c.disconnect(); } catch (Exception ignored) {}
                   }
               }
 
@@ -1767,12 +1791,20 @@ jobs:
                                       c.setRequestProperty("Range", "bytes=" + start + "-" + end);
                                       c.setRequestProperty("User-Agent", "WorkTime-Updater");
                                       if (c.getResponseCode() != 206) { failed[0] = true; return; }
+                                      String cr = c.getHeaderField("Content-Range");
+                                      if (cr == null || !cr.startsWith("bytes " + start + "-")) {
+                                          failed[0] = true;
+                                          return;
+                                      }
                                       InputStream in = c.getInputStream();
                                       byte[] buf = new byte[64 * 1024];
+                                      long remaining = end - start + 1;
                                       int n;
-                                      while ((n = in.read(buf)) > 0) {
+                                      while (remaining > 0 &&
+                                             (n = in.read(buf, 0, (int) Math.min(buf.length, remaining))) > 0) {
                                           f.write(buf, 0, n);
                                           DL.addAndGet(n);
+                                          remaining -= n;
                                       }
                                       in.close();
                                   } catch (Exception e) {
@@ -1786,7 +1818,9 @@ jobs:
                           ts[i].start();
                       }
                       for (Thread t : ts) { if (t != null) t.join(); }
-                      return !failed[0] && target.length() == total;
+                      boolean ok = !failed[0] && target.length() == total;
+                      if (!ok) { try { target.delete(); } catch (Exception ignored) {} }
+                      return ok;
                   } catch (Exception e) {
                       return false;
                   }
