@@ -1,7 +1,7 @@
 {
-  "versionName": "1.1.87",
-  "versionCode": 261,
-  "apk": "https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v261/worktime-release.apk",
-  "notes": "v1.1.87 自建HTTP下载+下载锁，解决系统队列排队与重复下载",
-  "publishedAt": "2026-11-27T13:59:00Z"
+  "versionName": "1.1.88",
+  "versionCode": 262,
+  "apk": "https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v262/worktime-release.apk",
+  "notes": "v1.1.88 下载完整性校验",
+  "publishedAt": "2026-11-27T14:12:22Z"
 }
