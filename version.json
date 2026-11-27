@@ -1,7 +1,7 @@
 {
-  "versionName": "1.1.80",
-  "versionCode": 254,
-  "apk": "https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v254/worktime-release.apk",
-  "notes": "v1.1.80 下载完成自动收起更新弹窗",
-  "publishedAt": "2026-11-27T12:41:26Z"
+  "versionName": "1.1.81",
+  "versionCode": 255,
+  "apk": "https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v255/worktime-release.apk",
+  "notes": "v1.1.81 修Updater插件未进桥：补capacitor.plugins.json注册",
+  "publishedAt": "2026-11-27T12:48:34Z"
 }
