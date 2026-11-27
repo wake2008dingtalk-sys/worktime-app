@@ -1,9 +1,9 @@
 {
-  "versionName": "1.1.101",
-  "versionCode": 276,
-  "apk": "https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v276/worktime-release.apk",
-  "apkMirror": "https://ghfast.top/https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v276/worktime-release.apk",
-  "sha256": "fa527dee0c46f818b0394fc84aabbcd4200b85df67b73ce3badb1b3a3feeb68c",
-  "notes": "v1.1.101 下载防御：头部校验+sha256+快速判死线路",
-  "publishedAt": "2026-11-27T17:20:20Z"
+  "versionName": "1.1.102",
+  "versionCode": 277,
+  "apk": "https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v277/worktime-release.apk",
+  "apkMirror": "https://ghfast.top/https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v277/worktime-release.apk",
+  "sha256": "448eb141caf18ee00387a5d592c23cf3b3a5f3aa406e4c88d40bf9de4dae6fd7",
+  "notes": "v1.1.102 完成提示显示校验通过",
+  "publishedAt": "2026-11-27T17:30:25Z"
 }
