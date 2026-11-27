@@ -1,8 +1,8 @@
 {
-  "versionName": "1.1.90",
-  "versionCode": 264,
-  "apk": "https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v264/worktime-release.apk",
-  "apkMirror": "https://ghfast.top/https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v264/worktime-release.apk",
-  "notes": "v1.1.90 下载显示当前线路",
-  "publishedAt": "2026-11-27T14:33:56Z"
+  "versionName": "1.1.91",
+  "versionCode": 265,
+  "apk": "https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v265/worktime-release.apk",
+  "apkMirror": "https://ghfast.top/https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v265/worktime-release.apk",
+  "notes": "v1.1.91 多线程分段下载（6线并行，镜像优先）",
+  "publishedAt": "2026-11-27T14:48:04Z"
 }
