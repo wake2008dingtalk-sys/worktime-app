@@ -1,9 +1,9 @@
 {
-  "versionName": "1.1.107",
-  "versionCode": 282,
-  "apk": "https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v282/worktime-release.apk",
-  "apkMirror": "https://ghfast.top/https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v282/worktime-release.apk",
-  "sha256": "ba867aa599e6e63911f9d16ab61320972c03ebcda43816748043b8b893d9e927",
-  "notes": "v1.1.107 假期记录显示停工/正处休假状态，补标签样式",
-  "publishedAt": "2026-11-28T02:17:09Z"
+  "versionName": "1.1.108",
+  "versionCode": 284,
+  "apk": "https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v284/worktime-release.apk",
+  "apkMirror": "https://ghfast.top/https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v284/worktime-release.apk",
+  "sha256": "d96736c3199b00558a7daf69b9c1c954fe3813c026af7b8fb4febff31f4ec1cf",
+  "notes": "v1.1.108 修正 graphics 导入位置",
+  "publishedAt": "2026-11-28T02:35:33Z"
 }
