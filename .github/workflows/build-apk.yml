@@ -1550,7 +1550,7 @@ jobs:
                                   com.baidu.mapapi.map.PolygonOptions po = new com.baidu.mapapi.map.PolygonOptions()
                                           .points(sectorPoints(center.latitude, center.longitude, radius, 0f, 26f))
                                           .fillColor((RADAR_ALPHA[i] << 24) | 0x00E60012)
-                                          .strokeWidth(0);
+                                          .stroke(new com.baidu.mapapi.map.Stroke(0, 0x00000000));
                                   radarPolys.add((com.baidu.mapapi.map.Polygon) baiduMap.addOverlay(po));
                               }
                               radarHandler = new android.os.Handler(android.os.Looper.getMainLooper());
