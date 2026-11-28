@@ -1589,7 +1589,6 @@ jobs:
                                           .fillColor(Color.argb(12, Color.red(color), Color.green(color), Color.blue(color)))
                                           .stroke(new com.baidu.mapapi.map.Stroke(2, Color.argb(230, Color.red(color), Color.green(color), Color.blue(color))));
                                   fenceCircle = (com.baidu.mapapi.map.Circle) baiduMap.addOverlay(circleOptions);
-                                  startNativeRadar(center, radius);
                                   JSObject result = new JSObject(); result.put("success", true); call.resolve(result);
                               } catch (Exception e) { call.reject("Failed: " + e.getMessage()); }
                           });
