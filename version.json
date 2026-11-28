@@ -1,9 +1,9 @@
 {
-  "versionName": "1.1.147",
-  "versionCode": 327,
-  "apk": "https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v327/worktime-release.apk",
-  "apkMirror": "https://ghfast.top/https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v327/worktime-release.apk",
-  "sha256": "561a52ac659c5d3928e868f26a84057f9a612fe9078bea02daf8b9fbcd162c1e",
-  "notes": "v1.1.147 雷达改指针束（Polyline），渲染稳定",
-  "publishedAt": "2026-11-28T10:40:36Z"
+  "versionName": "1.1.148",
+  "versionCode": 328,
+  "apk": "https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v328/worktime-release.apk",
+  "apkMirror": "https://ghfast.top/https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v328/worktime-release.apk",
+  "sha256": "a6e74f47aa05f914601d94578b3efafe171283ccb491e24556dab18a38016b83",
+  "notes": "v1.1.148 围栏与内环改折线，避免填充回退成实心",
+  "publishedAt": "2026-11-28T10:51:51Z"
 }
