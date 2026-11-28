@@ -1,9 +1,9 @@
 {
-  "versionName": "1.1.121",
-  "versionCode": 299,
-  "apk": "https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v299/worktime-release.apk",
-  "apkMirror": "https://ghfast.top/https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v299/worktime-release.apk",
-  "sha256": "434e316fbaad67147e69754b75566b6593dde9acf67888e11ff1122a3c3b4406",
-  "notes": "v1.1.121 围栏与雷达改红外激光观感",
-  "publishedAt": "2026-11-28T06:03:36Z"
+  "versionName": "1.1.122",
+  "versionCode": 300,
+  "apk": "https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v300/worktime-release.apk",
+  "apkMirror": "https://ghfast.top/https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v300/worktime-release.apk",
+  "sha256": "2918dd70245f93c0fb819cb328b01434a9d66d2ae0a230c87f35cb5d12c0cfd3",
+  "notes": "v1.1.122 围栏圆跟随工作地点",
+  "publishedAt": "2026-11-28T06:13:39Z"
 }
