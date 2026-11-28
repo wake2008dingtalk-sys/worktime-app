@@ -1,9 +1,9 @@
 {
-  "versionName": "1.1.138",
-  "versionCode": 318,
-  "apk": "https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v318/worktime-release.apk",
-  "apkMirror": "https://ghfast.top/https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v318/worktime-release.apk",
-  "sha256": "58ca664523eb37e1f1edbabc3e13c92e9ead168b3bf148617ad8f6a5ea6129d7",
-  "notes": "v1.1.138 网页雷达盘按参考图重画",
-  "publishedAt": "2026-11-28T09:07:10Z"
+  "versionName": "1.1.139",
+  "versionCode": 319,
+  "apk": "https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v319/worktime-release.apk",
+  "apkMirror": "https://ghfast.top/https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v319/worktime-release.apk",
+  "sha256": "9576987049962900e504af2367adb6984cd5c79f6b086756bf06d4d171dab69b",
+  "notes": "v1.1.139 雷达光束角度渐变+光刃辉光",
+  "publishedAt": "2026-11-28T09:15:32Z"
 }
