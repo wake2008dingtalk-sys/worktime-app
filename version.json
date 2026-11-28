@@ -1,9 +1,9 @@
 {
-  "versionName": "1.1.132",
-  "versionCode": 310,
-  "apk": "https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v310/worktime-release.apk",
-  "apkMirror": "https://ghfast.top/https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v310/worktime-release.apk",
-  "sha256": "ed21d4e0518276e71c919fef505716ff792b7824e53c1ce589244a83160421b8",
-  "notes": "v1.1.132 围栏线细化+扫描10层柔化",
-  "publishedAt": "2026-11-28T08:00:21Z"
+  "versionName": "1.1.133",
+  "versionCode": 312,
+  "apk": "https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v312/worktime-release.apk",
+  "apkMirror": "https://ghfast.top/https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v312/worktime-release.apk",
+  "sha256": "1bca30943c455700566d5571ac5413a69e1b0adf33294b1fdfa65c679aa49831",
+  "notes": "v1.1.133 修 PolygonOptions.stroke 用法",
+  "publishedAt": "2026-11-28T08:11:53Z"
 }
