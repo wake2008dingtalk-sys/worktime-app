@@ -1,9 +1,9 @@
 {
-  "versionName": "1.1.150",
-  "versionCode": 330,
-  "apk": "https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v330/worktime-release.apk",
-  "apkMirror": "https://ghfast.top/https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v330/worktime-release.apk",
-  "sha256": "56a1352d64f9a6a9815d1496c893ffc6a3270b67644f2e6e3e98c6e5ebf309a4",
-  "notes": "v1.1.150 圆段数翻倍到128",
-  "publishedAt": "2026-11-28T11:11:13Z"
+  "versionName": "1.1.151",
+  "versionCode": 331,
+  "apk": "https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v331/worktime-release.apk",
+  "apkMirror": "https://ghfast.top/https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v331/worktime-release.apk",
+  "sha256": "6a894cda7262ab34f41785d8313f08a66fa62d51f0b64359e6c0453556b44d9a",
+  "notes": "v1.1.151 圆环改回Circle真圆，fillOpacity 0.001",
+  "publishedAt": "2026-11-28T11:24:10Z"
 }
