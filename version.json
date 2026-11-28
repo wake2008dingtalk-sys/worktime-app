@@ -1,9 +1,9 @@
 {
-  "versionName": "1.1.149",
-  "versionCode": 329,
-  "apk": "https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v329/worktime-release.apk",
-  "apkMirror": "https://ghfast.top/https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v329/worktime-release.apk",
-  "sha256": "96ccfc2843240b60cbcd4c4881d300827fbec84b9c636b0f78f7070ab0df5246",
-  "notes": "v1.1.149 雷达线条规整化（12指针/实色外环）",
-  "publishedAt": "2026-11-28T11:02:09Z"
+  "versionName": "1.1.150",
+  "versionCode": 330,
+  "apk": "https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v330/worktime-release.apk",
+  "apkMirror": "https://ghfast.top/https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v330/worktime-release.apk",
+  "sha256": "56a1352d64f9a6a9815d1496c893ffc6a3270b67644f2e6e3e98c6e5ebf309a4",
+  "notes": "v1.1.150 圆段数翻倍到128",
+  "publishedAt": "2026-11-28T11:11:13Z"
 }
