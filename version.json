@@ -1,9 +1,9 @@
 {
-  "versionName": "1.1.106",
-  "versionCode": 281,
-  "apk": "https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v281/worktime-release.apk",
-  "apkMirror": "https://ghfast.top/https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v281/worktime-release.apk",
-  "sha256": "a379b99b1d9d85d6635f897123f7e065a19510d12cb87fb1b013c678eb24600c",
-  "notes": "v1.1.106 假期日不提示未签退，记录状态显示休假",
-  "publishedAt": "2026-11-28T01:58:29Z"
+  "versionName": "1.1.107",
+  "versionCode": 282,
+  "apk": "https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v282/worktime-release.apk",
+  "apkMirror": "https://ghfast.top/https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v282/worktime-release.apk",
+  "sha256": "ba867aa599e6e63911f9d16ab61320972c03ebcda43816748043b8b893d9e927",
+  "notes": "v1.1.107 假期记录显示停工/正处休假状态，补标签样式",
+  "publishedAt": "2026-11-28T02:17:09Z"
 }
