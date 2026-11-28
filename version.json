@@ -1,9 +1,9 @@
 {
-  "versionName": "1.1.120",
-  "versionCode": 298,
-  "apk": "https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v298/worktime-release.apk",
-  "apkMirror": "https://ghfast.top/https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v298/worktime-release.apk",
-  "sha256": "a2ccebabf46edac3ba517f18ce94769d218cfb4f5fde40eff13ba6b47138b351",
-  "notes": "v1.1.120 去掉不存在的 dottedLine 调用",
-  "publishedAt": "2026-11-28T05:54:04Z"
+  "versionName": "1.1.121",
+  "versionCode": 299,
+  "apk": "https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v299/worktime-release.apk",
+  "apkMirror": "https://ghfast.top/https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v299/worktime-release.apk",
+  "sha256": "434e316fbaad67147e69754b75566b6593dde9acf67888e11ff1122a3c3b4406",
+  "notes": "v1.1.121 围栏与雷达改红外激光观感",
+  "publishedAt": "2026-11-28T06:03:36Z"
 }
