@@ -1386,7 +1386,7 @@ jobs:
                                   String title = call.getString("title", "工作地点");
                                   LatLng position = new LatLng(lat, lng);
                                   if (workMarker != null) workMarker.remove();
-                                  BitmapDescriptor icon = luxIcon(android.R.drawable.ic_menu_mylocation, title);
+                                  BitmapDescriptor icon = skyIcon(android.R.drawable.ic_menu_mylocation, title);
                                   OverlayOptions markerOptions = new MarkerOptions().position(position).icon(icon).draggable(true);
                                   workMarker = (com.baidu.mapapi.map.Marker) baiduMap.addOverlay(markerOptions);
                                   JSObject result = new JSObject(); result.put("success", true); call.resolve(result);
