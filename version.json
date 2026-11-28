@@ -1,9 +1,9 @@
 {
-  "versionName": "1.1.117",
-  "versionCode": 293,
-  "apk": "https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v293/worktime-release.apk",
-  "apkMirror": "https://ghfast.top/https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v293/worktime-release.apk",
-  "sha256": "8e855f15f5274373e4cda4bbb141e71e806b51071e9e3eab60e2165219943a56",
-  "notes": "v1.1.117 标签加倒三角尾巴",
-  "publishedAt": "2026-11-28T05:01:34Z"
+  "versionName": "1.1.118",
+  "versionCode": 295,
+  "apk": "https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v295/worktime-release.apk",
+  "apkMirror": "https://ghfast.top/https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v295/worktime-release.apk",
+  "sha256": "c55fa9052ef5423f24f5855981cd46d014d7b594dc95301e5c78304b87f53bf7",
+  "notes": "v1.1.118 修 dp 浮点参数编译错误",
+  "publishedAt": "2026-11-28T05:23:04Z"
 }
