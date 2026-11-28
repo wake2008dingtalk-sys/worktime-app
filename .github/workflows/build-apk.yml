@@ -1545,9 +1545,61 @@ jobs:
                           return bmp;
                       }
 
+                      private com.baidu.mapapi.map.BaiduMap.OnMapStatusChangeListener radarStatusListener = null;
+                      private int radarLastSize = 0;
+                      private Runnable radarPendingRebuild = null;
+
+                      private int radarSizeForZoom(LatLng c, int radiusM) {
+                          int sizePx = dp(260);
+                          try {
+                              float zoom = baiduMap.getMapStatus().zoom;
+                              double mpp = 156543.03392 * Math.cos(Math.toRadians(c.latitude)) / Math.pow(2.0, zoom);
+                              int rpx = (int) (radiusM / mpp);
+                              if (rpx > 20) sizePx = Math.min(1600, rpx * 2);
+                          } catch (Exception ignored) {}
+                          return sizePx;
+                      }
+
+                      /** 缩放结束后重建位图：120ms 去抖 + 后台线程绘制，避免卡顿 */
+                      private void scheduleRadarRebuild() {
+                          if (radarHandler == null || radarCenter == null) return;
+                          if (radarPendingRebuild != null) radarHandler.removeCallbacks(radarPendingRebuild);
+                          radarPendingRebuild = new Runnable() {
+                              @Override public void run() {
+                                  final LatLng c = radarCenter;
+                                  final int radiusM = radarRadius;
+                                  if (c == null || baiduMap == null) return;
+                                  final int size = radarSizeForZoom(c, radiusM);
+                                  if (Math.abs(size - radarLastSize) < 10) return;
+                                  radarLastSize = size;
+                                  new Thread(new Runnable() {
+                                      @Override public void run() {
+                                          final Bitmap bmp = buildRadarBitmap(size);
+                                          if (bmp == null) return;
+                                          getActivity().runOnUiThread(new Runnable() {
+                                              @Override public void run() {
+                                                  try {
+                                                      if (radarMarker != null) {
+                                                          radarMarker.setIcon(BitmapDescriptorFactory.fromBitmap(bmp));
+                                                      }
+                                                  } catch (Exception ignored) {}
+                                              }
+                                          });
+                                      }
+                                  }).start();
+                              }
+                          };
+                          radarHandler.postDelayed(radarPendingRebuild, 120);
+                      }
+
                       private void stopNativeRadar() {
                           if (radarHandler != null) { radarHandler.removeCallbacksAndMessages(null); radarHandler = null; }
                           if (radarMarker != null) { try { radarMarker.remove(); } catch (Exception ignored) {} radarMarker = null; }
+                          if (radarStatusListener != null && baiduMap != null) {
+                              try { baiduMap.setOnMapStatusChangeListener(null); } catch (Exception ignored) {}
+                              radarStatusListener = null;
+                          }
+                          radarLastSize = 0;
                       }
 
                       private void startNativeRadar(LatLng center, int radius) {
@@ -1556,14 +1608,8 @@ jobs:
                               if (baiduMap == null || center == null) return;
                               radarCenter = center;
 
-                              /* 用缩放级别估算米/像素：156543.03392 * cos(lat) / 2^zoom */
-                              int sizePx = dp(260);
-                              try {
-                                  float zoom = baiduMap.getMapStatus().zoom;
-                                  double mpp = 156543.03392 * Math.cos(Math.toRadians(center.latitude)) / Math.pow(2.0, zoom);
-                                  int rpx = (int) (radius / mpp);
-                                  if (rpx > 20) sizePx = Math.min(1400, rpx * 2);
-                              } catch (Exception ignored) {}
+                              int sizePx = radarSizeForZoom(center, radius);
+                              radarLastSize = sizePx;
 
                               Bitmap bmp = buildRadarBitmap(sizePx);
                               com.baidu.mapapi.map.MarkerOptions mo = new com.baidu.mapapi.map.MarkerOptions()
@@ -1575,12 +1621,20 @@ jobs:
 
                               radarAngle = 0f;
                               radarHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+                              radarStatusListener = new com.baidu.mapapi.map.BaiduMap.OnMapStatusChangeListener() {
+                                  @Override public void onMapStatusChangeStart(com.baidu.mapapi.map.MapStatus s) {}
+                                  @Override public void onMapStatusChange(com.baidu.mapapi.map.MapStatus s) {}
+                                  @Override public void onMapStatusChangeFinish(com.baidu.mapapi.map.MapStatus s) {
+                                      scheduleRadarRebuild();
+                                  }
+                              };
+                              baiduMap.setOnMapStatusChangeListener(radarStatusListener);
                               radarHandler.postDelayed(new Runnable() {
                                   @Override public void run() {
                                       if (radarHandler == null || radarMarker == null) return;
-                                      radarAngle = (radarAngle + 2.2f) % 360f;
+                                      radarAngle = (radarAngle + 2.6f) % 360f;
                                       try { radarMarker.setRotate(radarAngle); } catch (Exception ignored) {}
-                                      if (radarHandler != null) radarHandler.postDelayed(this, 40);
+                                      if (radarHandler != null) radarHandler.postDelayed(this, 50);
                                   }
                               }, 40);
                           } catch (Exception e) {
