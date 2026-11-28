@@ -1,9 +1,9 @@
 {
-  "versionName": "1.1.127",
-  "versionCode": 305,
-  "apk": "https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v305/worktime-release.apk",
-  "apkMirror": "https://ghfast.top/https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v305/worktime-release.apk",
-  "sha256": "905625059411998ded83e3a7775140133f2835b57f4b329b2a6852bfa767da83",
-  "notes": "v1.1.127 打开地图对准工作点围栏",
-  "publishedAt": "2026-11-28T07:23:35Z"
+  "versionName": "1.1.128",
+  "versionCode": 306,
+  "apk": "https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v306/worktime-release.apk",
+  "apkMirror": "https://ghfast.top/https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v306/worktime-release.apk",
+  "sha256": "3f3c262844570cf011a6ef4d9e6826f236eebae7dd72efc863685893cf9c7481",
+  "notes": "v1.1.128 地图代码回退到1.1.119（修复缩放滑动失效）",
+  "publishedAt": "2026-11-28T07:33:34Z"
 }
