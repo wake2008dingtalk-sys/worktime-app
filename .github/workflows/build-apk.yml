@@ -1422,8 +1422,8 @@ jobs:
                               android.graphics.Paint tp = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
                               tp.setTextSize(dp(11));
                               tp.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
-                              tp.setColor(0xFFF7D774);
-                              tp.setShadowLayer(4f, 0f, 0f, 0xCCF7D774);
+                              tp.setColor(0xFFFFE9A8);
+                              tp.setShadowLayer(6f, 0f, 0f, 0xE6F7D774);
                               float tw = tp.measureText(text);
                               int bw = (int) Math.max(tw + pad * 2, base.getWidth());
                               int bh = (int) (dp(11) + pad * 2);
@@ -1433,8 +1433,13 @@ jobs:
                               android.graphics.RectF rf = new android.graphics.RectF((w - bw) / 2f, 0, (w + bw) / 2f, bh);
                               android.graphics.Paint bp = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
                               bp.setShader(new android.graphics.LinearGradient(rf.left, 0, rf.right, bh,
-                                      0xF04C1D95, 0xF078350F, android.graphics.Shader.TileMode.CLAMP));
+                                      0x4D4C1D95, 0x3D78350F, android.graphics.Shader.TileMode.CLAMP));
                               cv.drawRoundRect(rf, rad, rad, bp);
+                              /* 顶部内高光：模拟玻璃边缘受光 */
+                              android.graphics.Paint hp = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+                              hp.setShader(new android.graphics.LinearGradient(0, 0, 0, bh * 0.5f,
+                                      0x59FFFFFF, 0x00FFFFFF, android.graphics.Shader.TileMode.CLAMP));
+                              cv.drawRoundRect(new android.graphics.RectF(rf.left + dp(1), 1, rf.right - dp(1), bh * 0.52f), rad, rad, hp);
                               android.graphics.Paint sp = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
                               sp.setStyle(android.graphics.Paint.Style.STROKE);
                               sp.setStrokeWidth(dp(1));
