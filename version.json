@@ -1,9 +1,9 @@
 {
-  "versionName": "1.1.112",
-  "versionCode": 288,
-  "apk": "https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v288/worktime-release.apk",
-  "apkMirror": "https://ghfast.top/https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v288/worktime-release.apk",
-  "sha256": "c7daffc1d3a762d30c06ea6611bef9fcdf55dd6d1e58ac468d4c2c33762da574",
-  "notes": "v1.1.112 百度logo保留并移到左上角",
-  "publishedAt": "2026-11-28T03:25:38Z"
+  "versionName": "1.1.113",
+  "versionCode": 289,
+  "apk": "https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v289/worktime-release.apk",
+  "apkMirror": "https://ghfast.top/https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v289/worktime-release.apk",
+  "sha256": "22f302360fbe6ad6965a90b12e8649a3a22877c43189635b3b4331e5545e9080",
+  "notes": "v1.1.113 位置标记改高清天蓝玻璃",
+  "publishedAt": "2026-11-28T03:36:54Z"
 }
