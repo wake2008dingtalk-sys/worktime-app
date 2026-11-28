@@ -1513,6 +1513,7 @@ jobs:
                       private android.os.Handler radarHandler = null;
                       private float radarAngle = 0f;
                       private LatLng radarCenter = null;
+                      private int radarRadius = 200;
 
                       private Bitmap buildRadarBitmap(int sizePx) {
                           int s = Math.max(64, sizePx);
@@ -1607,6 +1608,7 @@ jobs:
                               stopNativeRadar();
                               if (baiduMap == null || center == null) return;
                               radarCenter = center;
+                              radarRadius = radius;
 
                               int sizePx = radarSizeForZoom(center, radius);
                               radarLastSize = sizePx;
@@ -1623,6 +1625,7 @@ jobs:
                               radarHandler = new android.os.Handler(android.os.Looper.getMainLooper());
                               radarStatusListener = new com.baidu.mapapi.map.BaiduMap.OnMapStatusChangeListener() {
                                   @Override public void onMapStatusChangeStart(com.baidu.mapapi.map.MapStatus s) {}
+                                  @Override public void onMapStatusChangeStart(com.baidu.mapapi.map.MapStatus s, int reason) {}
                                   @Override public void onMapStatusChange(com.baidu.mapapi.map.MapStatus s) {}
                                   @Override public void onMapStatusChangeFinish(com.baidu.mapapi.map.MapStatus s) {
                                       scheduleRadarRebuild();
