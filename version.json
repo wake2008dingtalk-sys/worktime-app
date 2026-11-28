@@ -1,9 +1,9 @@
 {
-  "versionName": "1.1.111",
-  "versionCode": 287,
-  "apk": "https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v287/worktime-release.apk",
-  "apkMirror": "https://ghfast.top/https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v287/worktime-release.apk",
-  "sha256": "d883b5675df93d6d24bb7cc48db112a65c3d4012805091f618a8432a494f37c3",
-  "notes": "v1.1.111 地图去掉说明文字与百度logo",
-  "publishedAt": "2026-11-28T03:16:27Z"
+  "versionName": "1.1.112",
+  "versionCode": 288,
+  "apk": "https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v288/worktime-release.apk",
+  "apkMirror": "https://ghfast.top/https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v288/worktime-release.apk",
+  "sha256": "c7daffc1d3a762d30c06ea6611bef9fcdf55dd6d1e58ac468d4c2c33762da574",
+  "notes": "v1.1.112 百度logo保留并移到左上角",
+  "publishedAt": "2026-11-28T03:25:38Z"
 }
