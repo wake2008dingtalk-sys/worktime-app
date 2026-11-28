@@ -1,9 +1,9 @@
 {
-  "versionName": "1.1.136",
-  "versionCode": 317,
-  "apk": "https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v317/worktime-release.apk",
-  "apkMirror": "https://ghfast.top/https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v317/worktime-release.apk",
-  "sha256": "7054176308cd2d29055013ce4a1c33ab8d0845965537c8c58e499b3c6f2481ed",
-  "notes": "v1.1.136 补 radarRadius 与监听接口",
-  "publishedAt": "2026-11-28T08:56:49Z"
+  "versionName": "1.1.138",
+  "versionCode": 318,
+  "apk": "https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v318/worktime-release.apk",
+  "apkMirror": "https://ghfast.top/https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v318/worktime-release.apk",
+  "sha256": "58ca664523eb37e1f1edbabc3e13c92e9ead168b3bf148617ad8f6a5ea6129d7",
+  "notes": "v1.1.138 网页雷达盘按参考图重画",
+  "publishedAt": "2026-11-28T09:07:10Z"
 }
