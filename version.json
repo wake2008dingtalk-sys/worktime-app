@@ -1,9 +1,9 @@
 {
-  "versionName": "1.1.118",
-  "versionCode": 295,
-  "apk": "https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v295/worktime-release.apk",
-  "apkMirror": "https://ghfast.top/https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v295/worktime-release.apk",
-  "sha256": "c55fa9052ef5423f24f5855981cd46d014d7b594dc95301e5c78304b87f53bf7",
-  "notes": "v1.1.118 修 dp 浮点参数编译错误",
-  "publishedAt": "2026-11-28T05:23:04Z"
+  "versionName": "1.1.119",
+  "versionCode": 296,
+  "apk": "https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v296/worktime-release.apk",
+  "apkMirror": "https://ghfast.top/https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v296/worktime-release.apk",
+  "sha256": "7d2b5a99584992e61d09fc9a31b76d93e67dfa867cb547a2c4a6cc1226048aad",
+  "notes": "v1.1.119 工作地址移到地图上方独立一行",
+  "publishedAt": "2026-11-28T05:32:08Z"
 }
