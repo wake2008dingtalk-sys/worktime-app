@@ -1,9 +1,9 @@
 {
-  "versionName": "1.1.152",
-  "versionCode": 332,
-  "apk": "https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v332/worktime-release.apk",
-  "apkMirror": "https://ghfast.top/https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v332/worktime-release.apk",
-  "sha256": "5e36c63c641f74193869ec4afeb65fb46a5e02d0844520dd63da724265904ee1",
-  "notes": "v1.1.152 扇形改填充多边形（24片渐变）",
-  "publishedAt": "2026-11-28T11:33:18Z"
+  "versionName": "1.1.153",
+  "versionCode": 333,
+  "apk": "https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v333/worktime-release.apk",
+  "apkMirror": "https://ghfast.top/https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v333/worktime-release.apk",
+  "sha256": "4e1c5e511b06873dbf20fd1ed6f95c47af63acfd620a883299da833ba7e32a91",
+  "notes": "v1.1.153 修TDZ：雷达状态提前声明",
+  "publishedAt": "2026-11-28T11:42:22Z"
 }
