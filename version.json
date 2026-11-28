@@ -1,9 +1,9 @@
 {
-  "versionName": "1.1.104",
-  "versionCode": 279,
-  "apk": "https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v279/worktime-release.apk",
-  "apkMirror": "https://ghfast.top/https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v279/worktime-release.apk",
-  "sha256": "0cf61a31551b2d7ceab0adff93d272d50670a3f731f14281f95aa003d7e1c081",
-  "notes": "v1.1.104 统计表假期行只留假标签，其余列显示破折号；假期不计入月合计",
-  "publishedAt": "2026-11-28T01:33:17Z"
+  "versionName": "1.1.105",
+  "versionCode": 280,
+  "apk": "https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v280/worktime-release.apk",
+  "apkMirror": "https://ghfast.top/https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v280/worktime-release.apk",
+  "sha256": "77d0eb2ff914af43aeac8271f1a09ef844b48186b80ccfc91b4d4c761aebdcb5",
+  "notes": "v1.1.105 首页概览与打卡记录假期口径统一",
+  "publishedAt": "2026-11-28T01:45:54Z"
 }
