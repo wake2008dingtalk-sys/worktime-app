@@ -1,9 +1,9 @@
 {
-  "versionName": "1.1.109",
-  "versionCode": 285,
-  "apk": "https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v285/worktime-release.apk",
-  "apkMirror": "https://ghfast.top/https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v285/worktime-release.apk",
-  "sha256": "914bc648974d3e41068e563a5bace18cfb0524753209af262c3c83892247ff7c",
-  "notes": "v1.1.109 修地图标签样式不生效：改 setStyle",
-  "publishedAt": "2026-11-28T02:48:16Z"
+  "versionName": "1.1.110",
+  "versionCode": 286,
+  "apk": "https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v286/worktime-release.apk",
+  "apkMirror": "https://ghfast.top/https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v286/worktime-release.apk",
+  "sha256": "3ca1319e5a69b6aebc2bb654ec8b87be7e4999d5be7d8bc9b32fa98a52bb85d9",
+  "notes": "v1.1.110 地图标签玻璃通透质感",
+  "publishedAt": "2026-11-28T03:03:46Z"
 }
