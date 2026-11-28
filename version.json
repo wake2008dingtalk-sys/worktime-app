@@ -1,9 +1,9 @@
 {
-  "versionName": "1.1.151",
-  "versionCode": 331,
-  "apk": "https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v331/worktime-release.apk",
-  "apkMirror": "https://ghfast.top/https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v331/worktime-release.apk",
-  "sha256": "6a894cda7262ab34f41785d8313f08a66fa62d51f0b64359e6c0453556b44d9a",
-  "notes": "v1.1.151 圆环改回Circle真圆，fillOpacity 0.001",
-  "publishedAt": "2026-11-28T11:24:10Z"
+  "versionName": "1.1.152",
+  "versionCode": 332,
+  "apk": "https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v332/worktime-release.apk",
+  "apkMirror": "https://ghfast.top/https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v332/worktime-release.apk",
+  "sha256": "5e36c63c641f74193869ec4afeb65fb46a5e02d0844520dd63da724265904ee1",
+  "notes": "v1.1.152 扇形改填充多边形（24片渐变）",
+  "publishedAt": "2026-11-28T11:33:18Z"
 }
