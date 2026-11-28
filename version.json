@@ -1,9 +1,9 @@
 {
-  "versionName": "1.1.144",
-  "versionCode": 324,
-  "apk": "https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v324/worktime-release.apk",
-  "apkMirror": "https://ghfast.top/https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v324/worktime-release.apk",
-  "sha256": "7f649610457eb7d05e845d96d746c21549e2a68691e52a4e6f7460467b6888bd",
-  "notes": "v1.1.144 外环收细",
-  "publishedAt": "2026-11-28T10:02:23Z"
+  "versionName": "1.1.145",
+  "versionCode": 325,
+  "apk": "https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v325/worktime-release.apk",
+  "apkMirror": "https://ghfast.top/https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v325/worktime-release.apk",
+  "sha256": "01b93dc3f0d3856f4eeee14f161f3dd592c7bef367bdca654d5668ef548954a1",
+  "notes": "v1.1.145 雷达盘适配缩放（小半径不出盘+缩放隐藏）",
+  "publishedAt": "2026-11-28T10:20:14Z"
 }
