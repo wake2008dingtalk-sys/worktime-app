@@ -1386,7 +1386,7 @@ jobs:
                                   String title = call.getString("title", "工作地点");
                                   LatLng position = new LatLng(lat, lng);
                                   if (workMarker != null) workMarker.remove();
-                                  BitmapDescriptor icon = skyIcon(android.R.drawable.ic_menu_mylocation, title);
+                                  BitmapDescriptor icon = workTriangle();
                                   OverlayOptions markerOptions = new MarkerOptions().position(position).icon(icon).draggable(true);
                                   workMarker = (com.baidu.mapapi.map.Marker) baiduMap.addOverlay(markerOptions);
                                   JSObject result = new JSObject(); result.put("success", true); call.resolve(result);
@@ -1417,6 +1417,34 @@ jobs:
 
                       private BitmapDescriptor luxIcon(int resId, String text) {
                           return luxIcon(resId, text, 0x4D4C1D95, 0x3D78350F, 0xB3F7D774, 0xFFFFE9A8);
+                      }
+
+                      /** v1.1.118：工作标记——工地指示牌黄倒三角 + 内嵌「工」字 */
+                      private BitmapDescriptor workTriangle() {
+                          int w = dp(44), h = dp(40);
+                          Bitmap bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+                          Canvas cv = new Canvas(bmp);
+                          android.graphics.Path p = new android.graphics.Path();
+                          p.moveTo(w / 2f, h - dp(2));
+                          p.lineTo(dp(2.5f), dp(4.5f));
+                          p.lineTo(w - dp(2.5f), dp(4.5f));
+                          p.close();
+                          android.graphics.Paint fill = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+                          fill.setShader(new android.graphics.LinearGradient(0, 0, 0, h,
+                                  0xFFFFD75E, 0xFFE09600, android.graphics.Shader.TileMode.CLAMP));
+                          cv.drawPath(p, fill);
+                          android.graphics.Paint st = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+                          st.setStyle(android.graphics.Paint.Style.STROKE);
+                          st.setStrokeWidth(dp(2.6f));
+                          st.setColor(0xFF6B4200);
+                          cv.drawPath(p, st);
+                          android.graphics.Paint tp = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+                          tp.setColor(0xFF5A3600);
+                          tp.setTextSize(dp(15));
+                          tp.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+                          tp.setTextAlign(android.graphics.Paint.Align.CENTER);
+                          cv.drawText("工", w / 2f, dp(24), tp);
+                          return BitmapDescriptorFactory.fromBitmap(bmp);
                       }
 
                       /** v1.1.113：位置标记专用天蓝玻璃配色 */
