@@ -1507,6 +1507,72 @@ jobs:
                           }
                       }
 
+                      /* v1.1.133：原生雷达扫描——Polygon 扇形逐帧旋转，10 层拖尾 */
+                      private final java.util.List<com.baidu.mapapi.map.Polygon> radarPolys =
+                              new java.util.ArrayList<>();
+                      private android.os.Handler radarHandler = null;
+                      private float radarAngle = 0f;
+                      private LatLng radarCenter = null;
+                      private int radarRadius = 200;
+                      private static final float[] RADAR_LAGS = {0f, 3.2f, 6.4f, 9.6f, 12.8f, 16f, 19.2f, 22.4f, 25.6f, 28.8f};
+                      private static final int[] RADAR_ALPHA = {51, 43, 37, 31, 26, 20, 17, 13, 9, 6};
+
+                      private java.util.List<LatLng> sectorPoints(double lat, double lng, int radiusM, float startDeg, float sweepDeg) {
+                          java.util.List<LatLng> pts = new java.util.ArrayList<>();
+                          pts.add(new LatLng(lat, lng));
+                          double mPerLat = 111320.0;
+                          double mPerLng = 111320.0 * Math.cos(lat * Math.PI / 180.0);
+                          int steps = 28;
+                          for (int i = 0; i <= steps; i++) {
+                              double a = Math.toRadians(startDeg + sweepDeg * ((double) i / steps));
+                              pts.add(new LatLng(lat + (radiusM * Math.sin(a)) / mPerLat,
+                                      lng + (radiusM * Math.cos(a)) / mPerLng));
+                          }
+                          return pts;
+                      }
+
+                      private void stopNativeRadar() {
+                          if (radarHandler != null) { radarHandler.removeCallbacksAndMessages(null); radarHandler = null; }
+                          for (com.baidu.mapapi.map.Polygon p : radarPolys) {
+                              try { p.remove(); } catch (Exception ignored) {}
+                          }
+                          radarPolys.clear();
+                      }
+
+                      private void startNativeRadar(LatLng center, int radius) {
+                          try {
+                              stopNativeRadar();
+                              if (baiduMap == null || center == null) return;
+                              radarCenter = center;
+                              radarRadius = radius;
+                              radarAngle = 0f;
+                              for (int i = 0; i < RADAR_LAGS.length; i++) {
+                                  com.baidu.mapapi.map.PolygonOptions po = new com.baidu.mapapi.map.PolygonOptions()
+                                          .points(sectorPoints(center.latitude, center.longitude, radius, 0f, 26f))
+                                          .fillColor((RADAR_ALPHA[i] << 24) | 0x00E60012)
+                                          .strokeWidth(0);
+                                  radarPolys.add((com.baidu.mapapi.map.Polygon) baiduMap.addOverlay(po));
+                              }
+                              radarHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+                              radarHandler.postDelayed(new Runnable() {
+                                  @Override public void run() {
+                                      if (radarHandler == null || baiduMap == null || radarCenter == null) return;
+                                      radarAngle = (radarAngle + 3f) % 360f;
+                                      for (int i = 0; i < radarPolys.size(); i++) {
+                                          try {
+                                              radarPolys.get(i).setPoints(sectorPoints(radarCenter.latitude,
+                                                      radarCenter.longitude, radarRadius,
+                                                      radarAngle - RADAR_LAGS[i], 26f));
+                                          } catch (Exception ignored) {}
+                                      }
+                                      if (radarHandler != null) radarHandler.postDelayed(this, 40);
+                                  }
+                              }, 40);
+                          } catch (Exception e) {
+                              Log.w("BaiduMapPlugin", "radar failed: " + e.getMessage());
+                          }
+                      }
+
                       @PluginMethod
                       public void drawFence(PluginCall call) {
                           getActivity().runOnUiThread(() -> {
@@ -1517,11 +1583,13 @@ jobs:
                                   int radius = call.getData().optInt("radius", 200);
                                   LatLng center = new LatLng(lat, lng);
                                   if (fenceCircle != null) fenceCircle.remove();
-                                  int color = Color.parseColor("#22c55e");
+                                  /* v1.1.133：围栏改火焰红细线（与网页端一致） */
+                                  int color = Color.parseColor("#E60012");
                                   CircleOptions circleOptions = new CircleOptions().center(center).radius(radius)
-                                          .fillColor(Color.argb(15, Color.red(color), Color.green(color), Color.blue(color)))
-                                          .stroke(new com.baidu.mapapi.map.Stroke(2, Color.argb(90, Color.red(color), Color.green(color), Color.blue(color))));
+                                          .fillColor(Color.argb(12, Color.red(color), Color.green(color), Color.blue(color)))
+                                          .stroke(new com.baidu.mapapi.map.Stroke(2, Color.argb(230, Color.red(color), Color.green(color), Color.blue(color))));
                                   fenceCircle = (com.baidu.mapapi.map.Circle) baiduMap.addOverlay(circleOptions);
+                                  startNativeRadar(center, radius);
                                   JSObject result = new JSObject(); result.put("success", true); call.resolve(result);
                               } catch (Exception e) { call.reject("Failed: " + e.getMessage()); }
                           });
