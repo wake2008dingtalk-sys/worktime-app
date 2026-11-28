@@ -1,9 +1,9 @@
 {
-  "versionName": "1.1.129",
-  "versionCode": 307,
-  "apk": "https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v307/worktime-release.apk",
-  "apkMirror": "https://ghfast.top/https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v307/worktime-release.apk",
-  "sha256": "a02510a350c027ced9900f9795cbba9ee222108292a9e80cd26f07dc71d19dc3",
-  "notes": "v1.1.129 围栏红圈+涟漪（纯BMap圆）",
-  "publishedAt": "2026-11-28T07:44:46Z"
+  "versionName": "1.1.130",
+  "versionCode": 308,
+  "apk": "https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v308/worktime-release.apk",
+  "apkMirror": "https://ghfast.top/https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v308/worktime-release.apk",
+  "sha256": "ecd9daa345e12c4d7f79058f7ddf7f8c97eaf1d284580954447a0da103cddc9b",
+  "notes": "v1.1.130 围栏改扇形雷达扫描（Polygon图元）",
+  "publishedAt": "2026-11-28T07:48:02Z"
 }
