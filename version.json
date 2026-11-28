@@ -1,9 +1,9 @@
 {
-  "versionName": "1.1.134",
-  "versionCode": 313,
-  "apk": "https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v313/worktime-release.apk",
-  "apkMirror": "https://ghfast.top/https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v313/worktime-release.apk",
-  "sha256": "486e227dde222a712f423ee2b9ff55f7282ae7308ea5c71de71ff51d0adf712c",
-  "notes": "v1.1.134 撤掉雷达，围栏只留细红线",
-  "publishedAt": "2026-11-28T08:22:06Z"
+  "versionName": "1.1.135",
+  "versionCode": 315,
+  "apk": "https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v315/worktime-release.apk",
+  "apkMirror": "https://ghfast.top/https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v315/worktime-release.apk",
+  "sha256": "e4eec7c6cf4397d6d5186296441f08c276bb6fbfa5a0ba347d4fecaa6702431c",
+  "notes": "v1.1.135 重写原生雷达块（去重+缩放换算）",
+  "publishedAt": "2026-11-28T08:43:02Z"
 }
