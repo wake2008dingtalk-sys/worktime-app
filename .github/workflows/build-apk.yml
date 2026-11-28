@@ -1427,7 +1427,7 @@ jobs:
                       private BitmapDescriptor luxIcon(int resId, String text, int c1, int c2, int borderColor, int textColor) {
                           try {
                               Bitmap base = BitmapFactory.decodeResource(getContext().getResources(), resId);
-                              int pad = dp(9), gap = dp(3), rad = dp(12);
+                              int pad = dp(9), gap = dp(11), rad = dp(12);
                               android.graphics.Paint tp = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
                               tp.setTextSize(dp(11));
                               tp.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
@@ -1457,6 +1457,21 @@ jobs:
                               float tx = (w - tw) / 2f;
                               float ty = bh / 2f - (tp.descent() + tp.ascent()) / 2f;
                               cv.drawText(text, tx, ty, tp);
+                              /* 倒三角尾巴：从气泡底边中点向下收拢，指向标记 */
+                              android.graphics.Path tri = new android.graphics.Path();
+                              float cx = w / 2f;
+                              tri.moveTo(cx - dp(6), bh - dp(1));
+                              tri.lineTo(cx + dp(6), bh - dp(1));
+                              tri.lineTo(cx, bh + dp(9));
+                              tri.close();
+                              android.graphics.Paint tpaint = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+                              tpaint.setColor(c1);
+                              cv.drawPath(tri, tpaint);
+                              android.graphics.Paint tstroke = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+                              tstroke.setStyle(android.graphics.Paint.Style.STROKE);
+                              tstroke.setStrokeWidth(dp(1));
+                              tstroke.setColor(borderColor);
+                              cv.drawPath(tri, tstroke);
                               cv.drawBitmap(base, (w - base.getWidth()) / 2f, bh + gap, null);
                               return BitmapDescriptorFactory.fromBitmap(out);
                           } catch (Exception e) {
