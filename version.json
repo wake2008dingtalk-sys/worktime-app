@@ -1,9 +1,9 @@
 {
-  "versionName": "1.1.110",
-  "versionCode": 286,
-  "apk": "https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v286/worktime-release.apk",
-  "apkMirror": "https://ghfast.top/https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v286/worktime-release.apk",
-  "sha256": "3ca1319e5a69b6aebc2bb654ec8b87be7e4999d5be7d8bc9b32fa98a52bb85d9",
-  "notes": "v1.1.110 地图标签玻璃通透质感",
-  "publishedAt": "2026-11-28T03:03:46Z"
+  "versionName": "1.1.111",
+  "versionCode": 287,
+  "apk": "https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v287/worktime-release.apk",
+  "apkMirror": "https://ghfast.top/https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v287/worktime-release.apk",
+  "sha256": "d883b5675df93d6d24bb7cc48db112a65c3d4012805091f618a8432a494f37c3",
+  "notes": "v1.1.111 地图去掉说明文字与百度logo",
+  "publishedAt": "2026-11-28T03:16:27Z"
 }
