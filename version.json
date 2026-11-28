@@ -1,9 +1,9 @@
 {
-  "versionName": "1.1.148",
-  "versionCode": 328,
-  "apk": "https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v328/worktime-release.apk",
-  "apkMirror": "https://ghfast.top/https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v328/worktime-release.apk",
-  "sha256": "a6e74f47aa05f914601d94578b3efafe171283ccb491e24556dab18a38016b83",
-  "notes": "v1.1.148 围栏与内环改折线，避免填充回退成实心",
-  "publishedAt": "2026-11-28T10:51:51Z"
+  "versionName": "1.1.149",
+  "versionCode": 329,
+  "apk": "https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v329/worktime-release.apk",
+  "apkMirror": "https://ghfast.top/https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v329/worktime-release.apk",
+  "sha256": "96ccfc2843240b60cbcd4c4881d300827fbec84b9c636b0f78f7070ab0df5246",
+  "notes": "v1.1.149 雷达线条规整化（12指针/实色外环）",
+  "publishedAt": "2026-11-28T11:02:09Z"
 }
