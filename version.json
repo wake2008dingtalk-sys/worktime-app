@@ -1,9 +1,9 @@
 {
-  "versionName": "1.1.119",
-  "versionCode": 296,
-  "apk": "https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v296/worktime-release.apk",
-  "apkMirror": "https://ghfast.top/https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v296/worktime-release.apk",
-  "sha256": "7d2b5a99584992e61d09fc9a31b76d93e67dfa867cb547a2c4a6cc1226048aad",
-  "notes": "v1.1.119 工作地址移到地图上方独立一行",
-  "publishedAt": "2026-11-28T05:32:08Z"
+  "versionName": "1.1.120",
+  "versionCode": 298,
+  "apk": "https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v298/worktime-release.apk",
+  "apkMirror": "https://ghfast.top/https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v298/worktime-release.apk",
+  "sha256": "a2ccebabf46edac3ba517f18ce94769d218cfb4f5fde40eff13ba6b47138b351",
+  "notes": "v1.1.120 去掉不存在的 dottedLine 调用",
+  "publishedAt": "2026-11-28T05:54:04Z"
 }
