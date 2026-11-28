@@ -1,9 +1,9 @@
 {
-  "versionName": "1.1.145",
-  "versionCode": 325,
-  "apk": "https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v325/worktime-release.apk",
-  "apkMirror": "https://ghfast.top/https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v325/worktime-release.apk",
-  "sha256": "01b93dc3f0d3856f4eeee14f161f3dd592c7bef367bdca654d5668ef548954a1",
-  "notes": "v1.1.145 雷达盘适配缩放（小半径不出盘+缩放隐藏）",
-  "publishedAt": "2026-11-28T10:20:14Z"
+  "versionName": "1.1.146",
+  "versionCode": 326,
+  "apk": "https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v326/worktime-release.apk",
+  "apkMirror": "https://ghfast.top/https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v326/worktime-release.apk",
+  "sha256": "cfbcae54243ff03a93e233b370f5fb29248a2c951cd4e5bf1b2efa1f50b6c445",
+  "notes": "v1.1.146 雷达改地理多边形，随缩放自动跟随",
+  "publishedAt": "2026-11-28T10:31:25Z"
 }
