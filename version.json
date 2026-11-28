@@ -1,9 +1,9 @@
 {
-  "versionName": "1.1.108",
-  "versionCode": 284,
-  "apk": "https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v284/worktime-release.apk",
-  "apkMirror": "https://ghfast.top/https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v284/worktime-release.apk",
-  "sha256": "d96736c3199b00558a7daf69b9c1c954fe3813c026af7b8fb4febff31f4ec1cf",
-  "notes": "v1.1.108 修正 graphics 导入位置",
-  "publishedAt": "2026-11-28T02:35:33Z"
+  "versionName": "1.1.109",
+  "versionCode": 285,
+  "apk": "https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v285/worktime-release.apk",
+  "apkMirror": "https://ghfast.top/https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v285/worktime-release.apk",
+  "sha256": "914bc648974d3e41068e563a5bace18cfb0524753209af262c3c83892247ff7c",
+  "notes": "v1.1.109 修地图标签样式不生效：改 setStyle",
+  "publishedAt": "2026-11-28T02:48:16Z"
 }
