@@ -1,9 +1,9 @@
 {
-  "versionName": "1.1.125",
-  "versionCode": 303,
-  "apk": "https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v303/worktime-release.apk",
-  "apkMirror": "https://ghfast.top/https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v303/worktime-release.apk",
-  "sha256": "941c2e40357315e57f645543c3c4514872c441879971240d6ad1fcfc1c0eae08",
-  "notes": "v1.1.125 移除雷达图层，围栏只留红色实线",
-  "publishedAt": "2026-11-28T06:47:52Z"
+  "versionName": "1.1.126",
+  "versionCode": 304,
+  "apk": "https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v304/worktime-release.apk",
+  "apkMirror": "https://ghfast.top/https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v304/worktime-release.apk",
+  "sha256": "b0ca8e8a8ae59fae9cfd8571e47e4d18c413e3f13800cabaeab584653b5c99d0",
+  "notes": "v1.1.126 雷达围栏改正红+扫描提亮",
+  "publishedAt": "2026-11-28T07:06:40Z"
 }
