@@ -2038,8 +2038,9 @@ jobs:
           manifest = 'android/app/src/main/AndroidManifest.xml'
           with open(manifest) as f:
               m = f.read()
-          # FileProvider：Android 7+ 安装本地 APK 必须用 content:// 而不是 file://
-          if 'com.worktime.tracker.fileprovider' not in m:
+          # FileProvider：Capacitor 模板已自带一条 androidx.core.content.FileProvider，
+          # 这里只在真的缺失时才补，避免同 authority 重复声明
+          if 'androidx.core.content.FileProvider' not in m:
               prov = ('        <provider\n'
                       '            android:name="androidx.core.content.FileProvider"\n'
                       '            android:authorities="com.worktime.tracker.fileprovider"\n'
@@ -2071,11 +2072,24 @@ jobs:
           if not os.path.exists(fp):
               with open(fp, 'w') as f:
                   f.write('<?xml version="1.0" encoding="utf-8"?>\n'
-                          '<paths>\n'
+                          '<paths xmlns:android="http://schemas.android.com/apk/res/android">\n'
                           '    <external-files-path name="updates" path="." />\n'
                           '    <files-path name="files" path="." />\n'
+                          '    <cache-path name="cache" path="." />\n'
                           '</paths>\n')
               print('Wrote res/xml/file_paths.xml')
+          else:
+              with open(fp) as f:
+                  fx = f.read()
+              if 'external-files-path' not in fx:
+                  fx = fx.replace('</paths>',
+                      '    <external-files-path name="updates" path="." />\n'
+                      '    <cache-path name="cache" path="." />\n</paths>')
+                  with open(fp, 'w') as f:
+                      f.write(fx)
+                  print('Merged external-files-path into file_paths.xml')
+              else:
+                  print('file_paths.xml already covers external-files-path')
           PYEOF
 
       - name: Set app version and SDK levels (v1.1.7 上架版)
