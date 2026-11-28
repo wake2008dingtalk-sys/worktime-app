@@ -1,9 +1,9 @@
 {
-  "versionName": "1.1.130",
-  "versionCode": 308,
-  "apk": "https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v308/worktime-release.apk",
-  "apkMirror": "https://ghfast.top/https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v308/worktime-release.apk",
-  "sha256": "ecd9daa345e12c4d7f79058f7ddf7f8c97eaf1d284580954447a0da103cddc9b",
-  "notes": "v1.1.130 围栏改扇形雷达扫描（Polygon图元）",
-  "publishedAt": "2026-11-28T07:48:02Z"
+  "versionName": "1.1.131",
+  "versionCode": 309,
+  "apk": "https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v309/worktime-release.apk",
+  "apkMirror": "https://ghfast.top/https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v309/worktime-release.apk",
+  "sha256": "023d4b14fc75383e9d7c1dec15398ea5f1acdb24d31820c8687a66fbf4d27fed",
+  "notes": "v1.1.131 雷达精修：5层光束+刻度圈+中心脉冲",
+  "publishedAt": "2026-11-28T07:53:58Z"
 }
