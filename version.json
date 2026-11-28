@@ -1,9 +1,9 @@
 {
-  "versionName": "1.1.142",
-  "versionCode": 322,
-  "apk": "https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v322/worktime-release.apk",
-  "apkMirror": "https://ghfast.top/https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v322/worktime-release.apk",
-  "sha256": "aaa2fd69cd1d292846ef2e884cd5d899903d842f89e5a303ce969d7acae73150",
-  "notes": "v1.1.142 峰值0.85+边线锁边",
-  "publishedAt": "2026-11-28T09:49:19Z"
+  "versionName": "1.1.143",
+  "versionCode": 323,
+  "apk": "https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v323/worktime-release.apk",
+  "apkMirror": "https://ghfast.top/https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v323/worktime-release.apk",
+  "sha256": "05e299140836a6c1242daee4a0c83e6db7774b58e6a5f7bb871cd500532a3710",
+  "notes": "v1.1.143 去掉光束边线只留光刃",
+  "publishedAt": "2026-11-28T09:57:57Z"
 }
