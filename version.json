@@ -1,9 +1,9 @@
 {
-  "versionName": "1.1.141",
-  "versionCode": 321,
-  "apk": "https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v321/worktime-release.apk",
-  "apkMirror": "https://ghfast.top/https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v321/worktime-release.apk",
-  "sha256": "af278bc3c6babe6afbc3447478eae430c802050ce4d25c09750eaab10cf0e3f5",
-  "notes": "v1.1.141 光束峰值1.0",
-  "publishedAt": "2026-11-28T09:40:41Z"
+  "versionName": "1.1.142",
+  "versionCode": 322,
+  "apk": "https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v322/worktime-release.apk",
+  "apkMirror": "https://ghfast.top/https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v322/worktime-release.apk",
+  "sha256": "aaa2fd69cd1d292846ef2e884cd5d899903d842f89e5a303ce969d7acae73150",
+  "notes": "v1.1.142 峰值0.85+边线锁边",
+  "publishedAt": "2026-11-28T09:49:19Z"
 }
