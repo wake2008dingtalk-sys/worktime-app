@@ -1,9 +1,9 @@
 {
-  "versionName": "1.1.124",
-  "versionCode": 302,
-  "apk": "https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v302/worktime-release.apk",
-  "apkMirror": "https://ghfast.top/https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v302/worktime-release.apk",
-  "sha256": "f1fea0a320d821afac80c97e12cb7b236b37d5d83588aa0e676ff8a6f772a280",
-  "notes": "v1.1.124 修雷达坐标偏移+激光线加粗",
-  "publishedAt": "2026-11-28T06:40:10Z"
+  "versionName": "1.1.125",
+  "versionCode": 303,
+  "apk": "https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v303/worktime-release.apk",
+  "apkMirror": "https://ghfast.top/https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v303/worktime-release.apk",
+  "sha256": "941c2e40357315e57f645543c3c4514872c441879971240d6ad1fcfc1c0eae08",
+  "notes": "v1.1.125 移除雷达图层，围栏只留红色实线",
+  "publishedAt": "2026-11-28T06:47:52Z"
 }
