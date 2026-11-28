@@ -1507,41 +1507,12 @@ jobs:
                           }
                       }
 
-                      /* v1.1.133：原生雷达扫描——Polygon 扇形逐帧旋转，10 层拖尾 */
-                      private final java.util.List<com.baidu.mapapi.map.Polygon> radarPolys =
-                              new java.util.ArrayList<>();
+                      /* v1.1.135：雷达盘 = 一张位图（同心环 + 十字线 + 渐变光束），
+                         用 Marker.setRotate 整张旋转；尺寸按当前缩放换算，线条清晰 */
+                      private com.baidu.mapapi.map.Marker radarMarker = null;
                       private android.os.Handler radarHandler = null;
                       private float radarAngle = 0f;
                       private LatLng radarCenter = null;
-                      private int radarRadius = 200;
-                      private static final float[] RADAR_LAGS = {0f, 3.2f, 6.4f, 9.6f, 12.8f, 16f, 19.2f, 22.4f, 25.6f, 28.8f};
-                      private static final int[] RADAR_ALPHA = {51, 43, 37, 31, 26, 20, 17, 13, 9, 6};
-
-                      private java.util.List<LatLng> sectorPoints(double lat, double lng, int radiusM, float startDeg, float sweepDeg) {
-                          java.util.List<LatLng> pts = new java.util.ArrayList<>();
-                          pts.add(new LatLng(lat, lng));
-                          double mPerLat = 111320.0;
-                          double mPerLng = 111320.0 * Math.cos(lat * Math.PI / 180.0);
-                          int steps = 28;
-                          for (int i = 0; i <= steps; i++) {
-                              double a = Math.toRadians(startDeg + sweepDeg * ((double) i / steps));
-                              pts.add(new LatLng(lat + (radiusM * Math.sin(a)) / mPerLat,
-                                      lng + (radiusM * Math.cos(a)) / mPerLng));
-                          }
-                          return pts;
-                      }
-
-                      private void stopNativeRadar() {
-                          if (radarHandler != null) { radarHandler.removeCallbacksAndMessages(null); radarHandler = null; }
-                          for (com.baidu.mapapi.map.Polygon p : radarPolys) {
-                              try { p.remove(); } catch (Exception ignored) {}
-                          }
-                          radarPolys.clear();
-                      }
-
-                      /* v1.1.135：雷达盘改为位图旋转——同心环 + 十字线 + 渐变光束画进一张图，
-                         用 Marker.setRotate 转整张图，线条清晰不被多边形填充污染 */
-                      private com.baidu.mapapi.map.Marker radarMarker = null;
 
                       private Bitmap buildRadarBitmap(int sizePx) {
                           int s = Math.max(64, sizePx);
@@ -1549,27 +1520,23 @@ jobs:
                           Canvas cv = new Canvas(bmp);
                           float cx = s / 2f, cy = s / 2f, R = s / 2f - dp(2);
 
-                          /* 光束：SweepGradient，尾淡头亮 */
                           android.graphics.Paint beam = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
                           beam.setShader(new android.graphics.SweepGradient(cx, cy,
-                                  new int[]{0x00E60012, 0x22E60012, 0x88E60012, 0x00E60012},
+                                  new int[]{0x00E60012, 0x22E60012, 0x8CE60012, 0x00E60012},
                                   new float[]{0f, 0.72f, 0.985f, 1f}));
                           cv.drawCircle(cx, cy, R, beam);
 
-                          /* 外环（亮） */
                           android.graphics.Paint ring = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
                           ring.setStyle(android.graphics.Paint.Style.STROKE);
                           ring.setStrokeWidth(dp(3));
                           ring.setColor(0xFFE60012);
                           cv.drawCircle(cx, cy, R, ring);
 
-                          /* 内两圈（淡） */
                           ring.setStrokeWidth(dp(1));
                           ring.setColor(0x99E60012);
                           cv.drawCircle(cx, cy, R * 0.72f, ring);
                           cv.drawCircle(cx, cy, R * 0.45f, ring);
 
-                          /* 十字线 */
                           android.graphics.Paint cross = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
                           cross.setColor(0x66E60012);
                           cross.setStrokeWidth(dp(1));
@@ -1581,10 +1548,6 @@ jobs:
                       private void stopNativeRadar() {
                           if (radarHandler != null) { radarHandler.removeCallbacksAndMessages(null); radarHandler = null; }
                           if (radarMarker != null) { try { radarMarker.remove(); } catch (Exception ignored) {} radarMarker = null; }
-                          for (com.baidu.mapapi.map.Polygon p : radarPolys) {
-                              try { p.remove(); } catch (Exception ignored) {}
-                          }
-                          radarPolys.clear();
                       }
 
                       private void startNativeRadar(LatLng center, int radius) {
@@ -1592,19 +1555,14 @@ jobs:
                               stopNativeRadar();
                               if (baiduMap == null || center == null) return;
                               radarCenter = center;
-                              radarRadius = radius;
 
-                              /* 用投影把 半径(米) 换算成像素，决定位图尺寸 */
-                              int sizePx = dp(240);
+                              /* 用缩放级别估算米/像素：156543.03392 * cos(lat) / 2^zoom */
+                              int sizePx = dp(260);
                               try {
-                                  com.baidu.mapapi.map.Projection proj = baiduMap.getProjection();
-                                  android.graphics.Point pc = proj.toPixels(center, null);
-                                  double mPerLat = 111320.0;
-                                  LatLng edge = new LatLng(center.latitude, center.longitude
-                                          + radius / (mPerLat * Math.cos(center.latitude * Math.PI / 180.0)));
-                                  android.graphics.Point pe = proj.toPixels(edge, null);
-                                  int rpx = Math.abs(pe.x - pc.x);
-                                  if (rpx > 16) sizePx = Math.min(1200, rpx * 2);
+                                  float zoom = baiduMap.getMapStatus().zoom;
+                                  double mpp = 156543.03392 * Math.cos(Math.toRadians(center.latitude)) / Math.pow(2.0, zoom);
+                                  int rpx = (int) (radius / mpp);
+                                  if (rpx > 20) sizePx = Math.min(1400, rpx * 2);
                               } catch (Exception ignored) {}
 
                               Bitmap bmp = buildRadarBitmap(sizePx);
