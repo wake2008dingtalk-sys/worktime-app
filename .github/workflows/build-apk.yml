@@ -141,6 +141,8 @@ jobs:
                   import android.app.NotificationChannel;
                   import android.app.NotificationManager;
                   import android.content.Context;
+                  import android.graphics.Bitmap;
+                  import android.graphics.Canvas;
                   import android.os.Build;
                   import androidx.core.app.NotificationCompat;
                   public class NotificationHelper {
@@ -663,6 +665,7 @@ jobs:
                    import android.content.Intent;
                    import android.content.SharedPreferences;
                    import android.graphics.Color;
+                  import android.graphics.BitmapFactory;
                    import android.graphics.PixelFormat;
                    import android.net.Uri;
                    import android.net.VpnService;
@@ -1383,8 +1386,8 @@ jobs:
                                   String title = call.getString("title", "工作地点");
                                   LatLng position = new LatLng(lat, lng);
                                   if (workMarker != null) workMarker.remove();
-                                  BitmapDescriptor icon = BitmapDescriptorFactory.fromResource(android.R.drawable.ic_menu_mylocation);
-                                  OverlayOptions markerOptions = new MarkerOptions().position(position).icon(icon).title(title).draggable(true);
+                                  BitmapDescriptor icon = luxIcon(android.R.drawable.ic_menu_mylocation, title);
+                                  OverlayOptions markerOptions = new MarkerOptions().position(position).icon(icon).draggable(true);
                                   workMarker = (com.baidu.mapapi.map.Marker) baiduMap.addOverlay(markerOptions);
                                   JSObject result = new JSObject(); result.put("success", true); call.resolve(result);
                               } catch (Exception e) { call.reject("Failed: " + e.getMessage()); }
@@ -1399,13 +1402,54 @@ jobs:
                                   double lng = call.getData().optDouble("lng", 116.3974);
                                   LatLng position = new LatLng(lat, lng);
                                   if (posMarker != null) posMarker.remove();
-                                  BitmapDescriptor icon = BitmapDescriptorFactory.fromResource(android.R.drawable.ic_menu_compass);
-                                  OverlayOptions markerOptions = new MarkerOptions().position(position).icon(icon).title("我的位置").draggable(false);
+                                  BitmapDescriptor icon = luxIcon(android.R.drawable.ic_menu_compass, "我的位置");
+                                  OverlayOptions markerOptions = new MarkerOptions().position(position).icon(icon).draggable(false);
                                   posMarker = (com.baidu.mapapi.map.Marker) baiduMap.addOverlay(markerOptions);
                                   JSObject result = new JSObject(); result.put("success", true); call.resolve(result);
                               } catch (Exception e) { call.reject("Failed: " + e.getMessage()); }
                           });
                       }
+                      /** v1.1.108：把标签画进 marker 位图——紫金渐变气泡 + 金边 + 发光 + 圆角，
+                          替代百度默认的白底直角 InfoWindow；标签随标记一起移动。 */
+                      private int dp(int v) {
+                          return (int) (v * getContext().getResources().getDisplayMetrics().density + 0.5f);
+                      }
+
+                      private BitmapDescriptor luxIcon(int resId, String text) {
+                          try {
+                              Bitmap base = BitmapFactory.decodeResource(getContext().getResources(), resId);
+                              int pad = dp(9), gap = dp(3), rad = dp(12);
+                              android.graphics.Paint tp = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+                              tp.setTextSize(dp(11));
+                              tp.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+                              tp.setColor(0xFFF7D774);
+                              tp.setShadowLayer(4f, 0f, 0f, 0xCCF7D774);
+                              float tw = tp.measureText(text);
+                              int bw = (int) Math.max(tw + pad * 2, base.getWidth());
+                              int bh = (int) (dp(11) + pad * 2);
+                              int w = bw, h = bh + gap + base.getHeight();
+                              Bitmap out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+                              Canvas cv = new Canvas(out);
+                              android.graphics.RectF rf = new android.graphics.RectF((w - bw) / 2f, 0, (w + bw) / 2f, bh);
+                              android.graphics.Paint bp = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+                              bp.setShader(new android.graphics.LinearGradient(rf.left, 0, rf.right, bh,
+                                      0xF04C1D95, 0xF078350F, android.graphics.Shader.TileMode.CLAMP));
+                              cv.drawRoundRect(rf, rad, rad, bp);
+                              android.graphics.Paint sp = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+                              sp.setStyle(android.graphics.Paint.Style.STROKE);
+                              sp.setStrokeWidth(dp(1));
+                              sp.setColor(0xB3F7D774);
+                              cv.drawRoundRect(rf, rad, rad, sp);
+                              float tx = (w - tw) / 2f;
+                              float ty = bh / 2f - (tp.descent() + tp.ascent()) / 2f;
+                              cv.drawText(text, tx, ty, tp);
+                              cv.drawBitmap(base, (w - base.getWidth()) / 2f, bh + gap, null);
+                              return BitmapDescriptorFactory.fromBitmap(out);
+                          } catch (Exception e) {
+                              return BitmapDescriptorFactory.fromResource(resId);
+                          }
+                      }
+
                       @PluginMethod
                       public void drawFence(PluginCall call) {
                           getActivity().runOnUiThread(() -> {
