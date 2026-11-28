@@ -1,7 +1,7 @@
 # WorkTime · 个人工时打卡
 
 <!-- AUTO:VERSION -->
-> **当前版本 v1.1.140**（versionCode 320）· 构建于 2026-11-28
+> **当前版本 v1.1.141**（versionCode 321）· 构建于 2026-11-28
 <!-- /AUTO:VERSION -->
 
 
