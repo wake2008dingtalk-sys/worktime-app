@@ -1426,8 +1426,8 @@ jobs:
                           Canvas cv = new Canvas(bmp);
                           android.graphics.Path p = new android.graphics.Path();
                           p.moveTo(w / 2f, h - dp(2));
-                          p.lineTo(dp(2.5f), dp(4.5f));
-                          p.lineTo(w - dp(2.5f), dp(4.5f));
+                          p.lineTo(dp(3), dp(5));
+                          p.lineTo(w - dp(3), dp(5));
                           p.close();
                           android.graphics.Paint fill = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
                           fill.setShader(new android.graphics.LinearGradient(0, 0, 0, h,
@@ -1435,7 +1435,7 @@ jobs:
                           cv.drawPath(p, fill);
                           android.graphics.Paint st = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
                           st.setStyle(android.graphics.Paint.Style.STROKE);
-                          st.setStrokeWidth(dp(2.6f));
+                          st.setStrokeWidth(dp(3));
                           st.setColor(0xFF6B4200);
                           cv.drawPath(p, st);
                           android.graphics.Paint tp = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
