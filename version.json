@@ -1,9 +1,9 @@
 {
-  "versionName": "1.1.139",
-  "versionCode": 319,
-  "apk": "https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v319/worktime-release.apk",
-  "apkMirror": "https://ghfast.top/https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v319/worktime-release.apk",
-  "sha256": "9576987049962900e504af2367adb6984cd5c79f6b086756bf06d4d171dab69b",
-  "notes": "v1.1.139 雷达光束角度渐变+光刃辉光",
-  "publishedAt": "2026-11-28T09:15:32Z"
+  "versionName": "1.1.140",
+  "versionCode": 320,
+  "apk": "https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v320/worktime-release.apk",
+  "apkMirror": "https://ghfast.top/https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v320/worktime-release.apk",
+  "sha256": "7ada80839d2eb158efcb678dc0cb8111987c224081b5afeb02516888a8f4ba23",
+  "notes": "v1.1.140 光束峰值提到0.85",
+  "publishedAt": "2026-11-28T09:36:01Z"
 }
