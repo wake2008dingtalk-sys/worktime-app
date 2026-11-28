@@ -1517,11 +1517,10 @@ jobs:
                                   int radius = call.getData().optInt("radius", 200);
                                   LatLng center = new LatLng(lat, lng);
                                   if (fenceCircle != null) fenceCircle.remove();
-                                  /* v1.1.120：围栏改天蓝实线（与网页端一致） */
-                                  int color = Color.parseColor("#FF3B30");
+                                  int color = Color.parseColor("#22c55e");
                                   CircleOptions circleOptions = new CircleOptions().center(center).radius(radius)
-                                          .fillColor(Color.argb(20, Color.red(color), Color.green(color), Color.blue(color)))
-                                          .stroke(new com.baidu.mapapi.map.Stroke(2, Color.argb(242, Color.red(color), Color.green(color), Color.blue(color))));
+                                          .fillColor(Color.argb(15, Color.red(color), Color.green(color), Color.blue(color)))
+                                          .stroke(new com.baidu.mapapi.map.Stroke(2, Color.argb(90, Color.red(color), Color.green(color), Color.blue(color))));
                                   fenceCircle = (com.baidu.mapapi.map.Circle) baiduMap.addOverlay(circleOptions);
                                   JSObject result = new JSObject(); result.put("success", true); call.resolve(result);
                               } catch (Exception e) { call.reject("Failed: " + e.getMessage()); }
