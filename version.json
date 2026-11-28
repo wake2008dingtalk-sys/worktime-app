@@ -1,9 +1,9 @@
 {
-  "versionName": "1.1.102",
-  "versionCode": 277,
-  "apk": "https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v277/worktime-release.apk",
-  "apkMirror": "https://ghfast.top/https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v277/worktime-release.apk",
-  "sha256": "448eb141caf18ee00387a5d592c23cf3b3a5f3aa406e4c88d40bf9de4dae6fd7",
-  "notes": "v1.1.102 完成提示显示校验通过",
-  "publishedAt": "2026-11-27T17:30:25Z"
+  "versionName": "1.1.103",
+  "versionCode": 278,
+  "apk": "https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v278/worktime-release.apk",
+  "apkMirror": "https://ghfast.top/https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v278/worktime-release.apk",
+  "sha256": "db2a29135fc83c34f59555405138b8b653a9843a984e71c5263dce80f97a2110",
+  "notes": "v1.1.103 修重复FileProvider+file_paths合并",
+  "publishedAt": "2026-11-28T00:55:55Z"
 }
