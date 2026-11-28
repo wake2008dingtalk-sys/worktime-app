@@ -1,9 +1,9 @@
 {
-  "versionName": "1.1.114",
-  "versionCode": 290,
-  "apk": "https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v290/worktime-release.apk",
-  "apkMirror": "https://ghfast.top/https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v290/worktime-release.apk",
-  "sha256": "029f49040d0534e4ae08948aa024c50288bba464ac013f0707b66cd5c2410908",
-  "notes": "v1.1.114 修工作地点标签被SDK默认样式覆盖",
-  "publishedAt": "2026-11-28T03:50:30Z"
+  "versionName": "1.1.115",
+  "versionCode": 291,
+  "apk": "https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v291/worktime-release.apk",
+  "apkMirror": "https://ghfast.top/https://github.com/wake2008dingtalk-sys/worktime-app/releases/download/v291/worktime-release.apk",
+  "sha256": "1eb71a110750b2c6eb89a02b81d87ec2df54e8989321b534058be778a402415f",
+  "notes": "v1.1.115 标签样式用important写入并补text-fill",
+  "publishedAt": "2026-11-28T04:07:06Z"
 }
